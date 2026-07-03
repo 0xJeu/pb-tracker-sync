@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+}
+
+def runeLiteVersion = 'latest.release'
+def pluginMainClass = 'com.pbtracker.PbTrackerPluginTest'
+
+repositories {
+    mavenLocal()
+    maven {
+        url = 'https://repo.runelite.net'
+        content {
+            includeGroupByRegex("net\\.runelite.*")
+        }
+    }
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+    testImplementation 'junit:junit:4.12'
+    testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+    testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+}
+
+group = 'com.pbtracker'
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(11)
+}
+
+// This is the important bit: `./gradlew run` compiles the plugin and boots
+// the actual RuneLite client with it pre-loaded, no need to clone the full
+// RuneLite source tree. See PbTrackerPluginTest.java.
+tasks.register('run', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = pluginMainClass
+
+    jvmArgs "-ea", "--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED"
+    args "--developer-mode", "--debug"
+}
