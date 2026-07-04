@@ -25,16 +25,16 @@ plugin's Configuration screen (wrench icon → search "PB Tracker Sync").
 
 | Setting | Description | Default |
 |---|---|---|
-| API base URL | Base URL of your PB tracker backend | `http://localhost:3000` |
+| API base URL | Base URL of your PB tracker backend | `https://osrs-pb-tracker-backend.vercel.app` |
 | Auto-sync new PBs | Push a PB the moment RuneLite records one | On |
 | Sync all PBs on login | Bulk-upload every known PB shortly after login | On |
-| Sync all PBs now | Toggle (either direction) to trigger an immediate bulk sync | Off |
+| Sync all PBs now | Check once to trigger an immediate bulk sync; the plugin resets it afterward | Off |
 | Last synced | Display only — shows "Last updated: `<timestamp>`" after each successful sync (or an error/nudge message if something needs attention). Technically an editable text box since RuneLite has no true read-only field type, but it's overwritten on every sync | "Never" |
 
 ## Building / testing locally
 
-This plugin has no dependency on a specific backend implementation. Point
-**API base URL** at whatever PB tracker backend you're running.
+The plugin defaults to the hosted PB tracker backend. For local development,
+point **API base URL** at whatever PB tracker backend you're running.
 
 Prerequisites:
 
@@ -57,5 +57,4 @@ testing sync behavior.
 This plugin sends your account hash (RuneLite's stable per-account
 identifier, not your password or any Jagex credential) and your current
 in-game display name to whatever server is configured under **API base
-URL**. By default that's `http://localhost:3000` — nothing leaves your own
-machine unless you change it.
+URL**. By default that's `https://osrs-pb-tracker-backend.vercel.app`.

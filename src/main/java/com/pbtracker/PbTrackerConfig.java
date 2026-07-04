@@ -10,12 +10,12 @@ public interface PbTrackerConfig extends Config
 	@ConfigItem(
 		keyName = "apiBaseUrl",
 		name = "API base URL",
-		description = "Base URL of your PB tracker backend, e.g. http://localhost:3000 or https://pbs.example.com",
+		description = "Base URL of your PB tracker backend, e.g. https://osrs-pb-tracker-backend.vercel.app",
 		position = 0
 	)
 	default String apiBaseUrl()
 	{
-		return "http://localhost:3000";
+		return "https://osrs-pb-tracker-backend.vercel.app";
 	}
 
 	@ConfigItem(
