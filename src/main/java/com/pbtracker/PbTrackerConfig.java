@@ -43,7 +43,7 @@ public interface PbTrackerConfig extends Config
 	@ConfigItem(
 		keyName = "syncNow",
 		name = "Sync all PBs now",
-		description = "Check once to trigger an immediate bulk sync. The plugin resets this afterward.",
+		description = "Check to trigger an immediate bulk sync. Uncheck and check again to trigger another one.",
 		position = 3
 	)
 	default boolean syncNow()

@@ -28,7 +28,7 @@ plugin's Configuration screen (wrench icon → search "PB Tracker Sync").
 | API base URL | Base URL of your PB tracker backend | `https://osrs-pb-tracker-backend.vercel.app` |
 | Auto-sync new PBs | Push a PB the moment RuneLite records one | On |
 | Sync all PBs on login | Bulk-upload every known PB shortly after login | On |
-| Sync all PBs now | Check once to trigger an immediate bulk sync; the plugin resets it afterward | Off |
+| Sync all PBs now | Check to trigger an immediate bulk sync. Uncheck and check again to trigger another one | Off |
 | Last synced | Display only — shows "Last updated: `<timestamp>`" after each successful sync (or an error/nudge message if something needs attention). Technically an editable text box since RuneLite has no true read-only field type, but it's overwritten on every sync | "Never" |
 
 ## Building / testing locally
@@ -55,6 +55,13 @@ testing sync behavior.
 ## Privacy note
 
 This plugin sends your account hash (RuneLite's stable per-account
-identifier, not your password or any Jagex credential) and your current
-in-game display name to whatever server is configured under **API base
-URL**. By default that's `https://osrs-pb-tracker-backend.vercel.app`.
+identifier, not your password or any Jagex credential), your current
+in-game display name, and your synced boss personal-best times to whatever
+server is configured under **API base URL**.
+
+By default that's `https://osrs-pb-tracker-backend.vercel.app`, a shared
+community leaderboard server operated by the plugin's author — not an
+official Jagex or RuneLite service. Your data is used to populate that
+public leaderboard, viewable by anyone. If you'd rather not share your data
+with that server, point **API base URL** at your own self-hosted backend
+(see "Building / testing locally" above) or a different one you trust.

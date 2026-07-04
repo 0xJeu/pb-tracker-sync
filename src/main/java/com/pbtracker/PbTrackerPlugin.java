@@ -202,22 +202,16 @@ public class PbTrackerPlugin extends Plugin
 	{
 		if (SETTINGS_GROUP.equals(event.getGroup()))
 		{
-			if (SYNC_NOW_KEY.equals(event.getKey()))
+			// Note: we deliberately do NOT reset this checkbox back to false
+			// programmatically after triggering a sync. RuneLite's config
+			// panel doesn't repaint from a programmatic change until the
+			// panel is closed and reopened, so resetting it here made the
+			// box look "stuck" checked even though the stored value was
+			// already false. Leaving it checked keeps the displayed state
+			// truthful - you'd need to manually uncheck it to trigger again.
+			if (SYNC_NOW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
-				if (shouldTriggerSyncNow(event.getNewValue()))
-				{
-					executor.execute(() ->
-					{
-						try
-						{
-							syncAll();
-						}
-						finally
-						{
-							resetSyncNow();
-						}
-					});
-				}
+				executor.execute(this::syncAll);
 			}
 			return;
 		}
@@ -283,11 +277,6 @@ public class PbTrackerPlugin extends Plugin
 	static boolean shouldTriggerSyncNow(String newValue)
 	{
 		return Boolean.parseBoolean(newValue);
-	}
-
-	private void resetSyncNow()
-	{
-		configManager.setConfiguration(SETTINGS_GROUP, SYNC_NOW_KEY, false);
 	}
 
 	@Subscribe
