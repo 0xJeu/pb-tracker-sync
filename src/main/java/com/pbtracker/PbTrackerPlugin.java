@@ -227,6 +227,10 @@ public class PbTrackerPlugin extends Plugin
 			{
 				executor.execute(this::dumpRawPersonalBests);
 			}
+			else if (OPEN_PROFILE_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
+			{
+				executor.execute(this::openProfile);
+			}
 			return;
 		}
 
@@ -638,6 +642,22 @@ public class PbTrackerPlugin extends Plugin
 		String report = buildRawPbReport(raw);
 		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(report), null);
 		setStatus("Copied " + raw.size() + " raw PB value(s) to clipboard.");
+	}
+
+	/**
+	 * Opens the current account's PB tracker profile page in the system
+	 * browser - mirrors Wise Old Man's "open my profile" feature.
+	 */
+	private void openProfile()
+	{
+		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		{
+			setStatus("Not logged in yet - log in, then try again.");
+			return;
+		}
+
+		String url = buildProfileUrl(client.getLocalPlayer().getName());
+		LinkBrowser.browse(url);
 	}
 
 	/**
