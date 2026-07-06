@@ -289,7 +289,8 @@ public class PbTrackerPlugin extends Plugin
 		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
 			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
 			|| lower.matches("^theatre of blood (entry mode|hard mode) (solo|\\d+ players)$")
-			|| lower.matches("^tombs of amascut (entry mode|expert mode) (solo|\\d+ players)$");
+			|| lower.matches("^tombs of amascut (entry mode|expert mode) (solo|\\d+ players)$")
+			|| lower.matches("^nightmare (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$");
 	}
 
 	static boolean shouldTriggerSyncNow(String newValue)

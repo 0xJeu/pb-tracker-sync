@@ -51,6 +51,18 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void skipsNightmareTeamSizeVariants()
+	{
+		// Bare "nightmare" is gated separately via KNOWN_DUPLICATE_RAW_KEYS
+		// (different internal name than its Adventure Log heading); its
+		// team-size suffixed forms need their own pattern, same shape as
+		// the CoX/ToB/ToA team-size variants above.
+		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("nightmare 6+ players"));
+		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("nightmare 2 players"));
+		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("nightmare solo"));
+	}
+
+	@Test
 	public void rawPbReportAnnotatesOrdinaryBossAsSynced()
 	{
 		Map<String, Double> raw = new LinkedHashMap<>();
