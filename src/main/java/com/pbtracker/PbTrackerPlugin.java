@@ -20,6 +20,8 @@ import okhttp3.Callback;
 import okhttp3.Response;
 
 import javax.inject.Inject;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -31,6 +33,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -75,6 +78,7 @@ public class PbTrackerPlugin extends Plugin
 	private static final String INSTALL_SECRET_KEY = "installSecret";
 	private static final String SYNC_NOW_KEY = "syncNow";
 	private static final String SYNC_STATUS_KEY = "syncStatus";
+	private static final String DUMP_RAW_KEY = "dumpRawPbs";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
 	// Matches any "Fastest <descriptor>: <value>" line on the Adventure Log
@@ -213,6 +217,10 @@ public class PbTrackerPlugin extends Plugin
 			if (SYNC_NOW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
 				executor.execute(this::syncAll);
+			}
+			else if (DUMP_RAW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
+			{
+				executor.execute(this::dumpRawPersonalBests);
 			}
 			return;
 		}
@@ -591,6 +599,77 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		return "Not synced yet: " + String.join(", ", unsynced) + " - open Adventure Log > Counters once to sync.";
+	}
+
+	/**
+	 * Diagnostic dump of every raw personalbest.* value RuneLite has cached,
+	 * independent of whether our own sync logic would forward it - lets a
+	 * player prove what RuneLite actually has locally without relying on
+	 * per-boss !pb chat commands. Copies the report to the clipboard rather
+	 * than syncing anything.
+	 */
+	private void dumpRawPersonalBests()
+	{
+		String profileKey = configManager.getRSProfileKey();
+		if (profileKey == null)
+		{
+			setStatus("Not logged in yet - log in, then try again.");
+			return;
+		}
+
+		List<String> bossKeys = configManager.getRSProfileConfigurationKeys(CONFIG_GROUP, profileKey, "");
+
+		Map<String, Double> raw = new HashMap<>();
+		for (String boss : bossKeys)
+		{
+			Double seconds = configManager.getRSProfileConfiguration(CONFIG_GROUP, boss, double.class);
+			if (seconds != null)
+			{
+				raw.put(boss, seconds);
+			}
+		}
+
+		String report = buildRawPbReport(raw);
+		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(report), null);
+		setStatus("Copied " + raw.size() + " raw PB value(s) to clipboard.");
+	}
+
+	/**
+	 * Pure formatting of a raw personalbest.* map into a diagnostic report,
+	 * annotating each entry with whether shouldSyncRawPersonalBest() would
+	 * forward it as-is or is gating it (and why) - kept static and free of
+	 * ConfigManager/AWT so it's directly unit-testable.
+	 */
+	static String buildRawPbReport(Map<String, Double> raw)
+	{
+		Map<String, Double> sorted = new TreeMap<>(raw);
+		StringBuilder report = new StringBuilder();
+		for (Map.Entry<String, Double> entry : sorted.entrySet())
+		{
+			String key = entry.getKey();
+			report.append("personalbest.").append(key).append(" = ").append(entry.getValue()).append(" -> ");
+
+			if (shouldSyncRawPersonalBest(key))
+			{
+				report.append("synced as \"").append(canonicalBossKey(key)).append('"');
+			}
+			else
+			{
+				String heading = KNOWN_DUPLICATE_RAW_KEYS.get(key.toLowerCase());
+				if (heading != null)
+				{
+					report.append("SKIPPED (gated, waiting on Adventure Log Counters -> \"").append(heading).append("\")");
+				}
+				else
+				{
+					report.append("SKIPPED (raid/team-size variant, waiting on Adventure Log Counters)");
+				}
+			}
+
+			report.append('\n');
+		}
+
+		return report.toString();
 	}
 
 	private void syncPbs(Map<String, Double> pbs)

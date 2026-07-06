@@ -63,4 +63,16 @@ public interface PbTrackerConfig extends Config
 	{
 		return "Never";
 	}
+
+	@ConfigItem(
+		keyName = "dumpRawPbs",
+		name = "Copy raw PB data to clipboard",
+		description = "Toggle this (either direction) to copy every raw personalbest.* "
+			+ "value RuneLite has cached, and whether it would sync as-is, to your clipboard.",
+		position = 5
+	)
+	default boolean dumpRawPbs()
+	{
+		return false;
+	}
 }

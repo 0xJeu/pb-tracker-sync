@@ -1,5 +1,7 @@
 package com.pbtracker;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.junit.Test;
 
 import static org.junit.Assert.assertFalse;
@@ -46,5 +48,65 @@ public class PbTrackerPluginUnitTest
 		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("chambers of xeric challenge mode solo"));
 		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("theatre of blood entry mode solo"));
 		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("tombs of amascut expert mode 4 players"));
+	}
+
+	@Test
+	public void rawPbReportAnnotatesOrdinaryBossAsSynced()
+	{
+		Map<String, Double> raw = new LinkedHashMap<>();
+		raw.put("cerberus", 61.0);
+
+		String report = PbTrackerPlugin.buildRawPbReport(raw);
+
+		assertEquals("personalbest.cerberus = 61.0 -> synced as \"cerberus\"\n", report);
+	}
+
+	@Test
+	public void rawPbReportAnnotatesAwakenedAliasAsSynced()
+	{
+		Map<String, Double> raw = new LinkedHashMap<>();
+		raw.put("duke sucellus awakened", 353.2);
+
+		String report = PbTrackerPlugin.buildRawPbReport(raw);
+
+		assertEquals("personalbest.duke sucellus awakened = 353.2 -> synced as \"Duke Sucellus (awakened)\"\n", report);
+	}
+
+	@Test
+	public void rawPbReportAnnotatesKnownDuplicateAsGated()
+	{
+		Map<String, Double> raw = new LinkedHashMap<>();
+		raw.put("tztok-jad", 132.4);
+
+		String report = PbTrackerPlugin.buildRawPbReport(raw);
+
+		assertEquals(
+			"personalbest.tztok-jad = 132.4 -> SKIPPED (gated, waiting on Adventure Log Counters -> \"TzHaar Fight Cave\")\n",
+			report);
+	}
+
+	@Test
+	public void rawPbReportAnnotatesUnlistedRaidVariantAsSkipped()
+	{
+		Map<String, Double> raw = new LinkedHashMap<>();
+		raw.put("chambers of xeric 2 players", 1200.0);
+
+		String report = PbTrackerPlugin.buildRawPbReport(raw);
+
+		assertEquals(
+			"personalbest.chambers of xeric 2 players = 1200.0 -> SKIPPED (raid/team-size variant, waiting on Adventure Log Counters)\n",
+			report);
+	}
+
+	@Test
+	public void rawPbReportSortsEntriesByKey()
+	{
+		Map<String, Double> raw = new LinkedHashMap<>();
+		raw.put("zulrah", 41.0);
+		raw.put("cerberus", 61.0);
+
+		String report = PbTrackerPlugin.buildRawPbReport(raw);
+
+		assertTrue(report.indexOf("cerberus") < report.indexOf("zulrah"));
 	}
 }
