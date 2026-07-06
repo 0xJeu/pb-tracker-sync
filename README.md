@@ -25,11 +25,13 @@ plugin's Configuration screen (wrench icon → search "PB Tracker Sync").
 
 | Setting | Description | Default |
 |---|---|---|
-| API base URL | Base URL of your PB tracker backend | `https://osrs-pb-tracker-backend.vercel.app` |
+| API base URL | Base URL of your PB tracker backend. Changing it prompts a Yes/No confirmation, since pointing it at the wrong server means your PBs stop reaching the real leaderboard without any obvious error | `https://osrs-pb-tracker-backend.vercel.app` |
 | Auto-sync new PBs | Push a PB the moment RuneLite records one | On |
 | Sync all PBs on login | Bulk-upload every known PB shortly after login | On |
 | Sync all PBs now | Check to trigger an immediate bulk sync. Uncheck and check again to trigger another one | Off |
 | Last synced | Display only — shows "Last updated: `<timestamp>`" after each successful sync (or an error/nudge message if something needs attention). Technically an editable text box since RuneLite has no true read-only field type, but it's overwritten on every sync | "Never" |
+| Copy raw PB data to clipboard | Check to copy every raw `personalbest.*` value RuneLite has cached for your account to your clipboard, annotated with whether it would sync as-is - useful for reporting a PB that looks wrong on the site | Off |
+| Open my profile in browser | Check to open your PB tracker profile page in your browser | Off |
 
 ## Building / testing locally
 
