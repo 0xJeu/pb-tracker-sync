@@ -11,6 +11,8 @@ public interface PbTrackerConfig extends Config
 		keyName = "apiBaseUrl",
 		name = "API base URL",
 		description = "Base URL of your PB tracker backend, e.g. https://osrs-pb-tracker-backend.vercel.app",
+		warning = "Changing this will send your PB data to a different server instead of the default "
+			+ "PB Tracker leaderboard. Only change this if you're running your own backend or testing locally.",
 		position = 0
 	)
 	default String apiBaseUrl()
