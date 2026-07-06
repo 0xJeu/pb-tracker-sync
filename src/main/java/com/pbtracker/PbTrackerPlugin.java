@@ -23,10 +23,9 @@ import okhttp3.Response;
 import javax.inject.Inject;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
-import java.io.UnsupportedEncodingException;
+import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -686,15 +685,7 @@ public class PbTrackerPlugin extends Plugin
 	 */
 	static String buildProfileUrl(String playerName)
 	{
-		try
-		{
-			return PROFILE_SITE_URL + "/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8.name());
-		}
-		catch (UnsupportedEncodingException ex)
-		{
-			// UTF-8 is always supported; this branch is unreachable in practice.
-			throw new AssertionError(ex);
-		}
+		return PROFILE_SITE_URL + "/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8);
 	}
 
 	private void syncPbs(Map<String, Double> pbs)
