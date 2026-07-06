@@ -77,4 +77,15 @@ public interface PbTrackerConfig extends Config
 	{
 		return false;
 	}
+
+	@ConfigItem(
+		keyName = "openProfile",
+		name = "Open my profile in browser",
+		description = "Toggle this (either direction) to open your PB tracker profile page in your browser.",
+		position = 6
+	)
+	default boolean openProfile()
+	{
+		return false;
+	}
 }
