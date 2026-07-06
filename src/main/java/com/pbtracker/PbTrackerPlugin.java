@@ -705,7 +705,14 @@ public class PbTrackerPlugin extends Plugin
 	 */
 	static String buildProfileUrl(String playerName)
 	{
-		return PROFILE_SITE_URL + "/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8);
+		// URLEncoder implements HTML form encoding (encodes a space as "+"),
+		// but the frontend decodes the path segment with JavaScript's
+		// decodeURIComponent, which does NOT treat "+" as a space - only
+		// %-escapes are decoded. Replacing "+" with "%20" after encoding
+		// matches what JavaScript's encodeURIComponent produces for a space,
+		// so the two sides agree.
+		String encoded = URLEncoder.encode(playerName, StandardCharsets.UTF_8).replace("+", "%20");
+		return PROFILE_SITE_URL + "/player/" + encoded;
 	}
 
 	private void syncPbs(Map<String, Double> pbs)

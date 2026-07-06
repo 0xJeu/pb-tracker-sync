@@ -131,10 +131,10 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
-	public void buildsProfileUrlWithUrlEncodedSpaces()
+	public void buildsProfileUrlWithPercentEncodedSpaces()
 	{
 		assertEquals(
-			"https://osrs-pb-tracker-frontend.vercel.app/player/Blitzen+Jones",
+			"https://osrs-pb-tracker-frontend.vercel.app/player/Blitzen%20Jones",
 			PbTrackerPlugin.buildProfileUrl("Blitzen Jones"));
 	}
 }
