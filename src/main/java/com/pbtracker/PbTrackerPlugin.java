@@ -202,13 +202,14 @@ public class PbTrackerPlugin extends Plugin
 	{
 		if (SETTINGS_GROUP.equals(event.getGroup()))
 		{
-			// Note: we deliberately do NOT reset this checkbox back to false
-			// programmatically after triggering a sync. RuneLite's config
-			// panel doesn't repaint from a programmatic change until the
-			// panel is closed and reopened, so resetting it here made the
-			// box look "stuck" checked even though the stored value was
-			// already false. Leaving it checked keeps the displayed state
-			// truthful - you'd need to manually uncheck it to trigger again.
+			// The config panel has no notion of a "button" - toggling a
+			// checkbox to trigger an action is the usual RuneLite idiom for
+			// this. We deliberately don't reset it back programmatically:
+			// the config panel doesn't repaint from a programmatic change
+			// until the panel is closed and reopened, which made the box
+			// look "stuck" checked. Triggering on either direction of the
+			// toggle avoids that entirely - whatever you clicked is what's
+			// actually stored, so there's nothing for the UI to get stale on.
 			if (SYNC_NOW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
 				executor.execute(this::syncAll);
@@ -229,7 +230,7 @@ public class PbTrackerPlugin extends Plugin
 			return;
 		}
 
-		if (looksLikeRaidVariant(boss))
+		if (!shouldSyncRawPersonalBest(boss))
 		{
 			// Raid/team-size records (e.g. "chambers of xeric 2 players") get
 			// synced with proper Room/Overall labels from the Adventure Log
@@ -247,7 +248,7 @@ public class PbTrackerPlugin extends Plugin
 		{
 			double seconds = Double.parseDouble(rawValue);
 			Map<String, Double> single = new HashMap<>();
-			single.put(boss, seconds);
+			single.put(canonicalBossKey(boss), seconds);
 			syncPbs(single);
 		}
 		catch (NumberFormatException ex)
@@ -264,6 +265,11 @@ public class PbTrackerPlugin extends Plugin
 	 * it's one of the few activities stored under a different internal name
 	 * than the Adventure Log's own heading for it.
 	 */
+	static boolean shouldSyncRawPersonalBest(String key)
+	{
+		return !looksLikeRaidVariant(key);
+	}
+
 	private static boolean looksLikeRaidVariant(String key)
 	{
 		String lower = key.toLowerCase();
@@ -271,12 +277,52 @@ public class PbTrackerPlugin extends Plugin
 		{
 			return true;
 		}
-		return lower.matches(".*\\d.*") || lower.endsWith(" solo") || lower.contains(" mode");
+
+		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
+			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
+			|| lower.matches("^theatre of blood (entry mode|hard mode) (solo|\\d+ players)$")
+			|| lower.matches("^tombs of amascut (entry mode|expert mode) (solo|\\d+ players)$");
 	}
 
 	static boolean shouldTriggerSyncNow(String newValue)
 	{
-		return Boolean.parseBoolean(newValue);
+		return newValue != null;
+	}
+
+	static String canonicalBossKey(String key)
+	{
+		String lower = key.toLowerCase();
+		switch (lower)
+		{
+			case "the leviathan":
+			case "levi":
+				return "Leviathan";
+			case "duke":
+				return "Duke Sucellus";
+			case "the whisperer":
+			case "whisp":
+			case "wisp":
+				return "Whisperer";
+			case "vard":
+				return "Vardorvis";
+			case "leviathan awakened":
+			case "the leviathan awakened":
+			case "levi awakened":
+				return "Leviathan (awakened)";
+			case "duke sucellus awakened":
+			case "duke awakened":
+				return "Duke Sucellus (awakened)";
+			case "whisperer awakened":
+			case "the whisperer awakened":
+			case "whisp awakened":
+			case "wisp awakened":
+				return "Whisperer (awakened)";
+			case "vardorvis awakened":
+			case "vard awakened":
+				return "Vardorvis (awakened)";
+			default:
+				return key;
+		}
 	}
 
 	@Subscribe
@@ -399,9 +445,10 @@ public class PbTrackerPlugin extends Plugin
 	 */
 	private static String buildKey(String heading, String descriptor)
 	{
+		String normalizedHeading = canonicalBossKey(heading);
 		if (descriptor.equals("kill") || descriptor.equals("run"))
 		{
-			return heading;
+			return normalizedHeading;
 		}
 
 		String label;
@@ -444,7 +491,7 @@ public class PbTrackerPlugin extends Plugin
 			.replaceAll("[()]", "")
 			.trim();
 
-		return heading + " - " + label + (detail.isEmpty() ? "" : " (" + detail + ")");
+		return normalizedHeading + " - " + label + (detail.isEmpty() ? "" : " (" + detail + ")");
 	}
 
 	private static Double parseTimeString(String timeString)
@@ -497,9 +544,9 @@ public class PbTrackerPlugin extends Plugin
 		for (Map.Entry<String, Double> entry : raw.entrySet())
 		{
 			String key = entry.getKey();
-			if (!looksLikeRaidVariant(key))
+			if (shouldSyncRawPersonalBest(key))
 			{
-				pbs.put(key, entry.getValue());
+				pbs.put(canonicalBossKey(key), entry.getValue());
 			}
 		}
 
