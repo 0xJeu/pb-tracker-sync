@@ -121,4 +121,20 @@ public class PbTrackerPluginUnitTest
 
 		assertTrue(report.indexOf("cerberus") < report.indexOf("zulrah"));
 	}
+
+	@Test
+	public void buildsProfileUrlForSimpleName()
+	{
+		assertEquals(
+			"https://osrs-pb-tracker-frontend.vercel.app/player/Zulrah",
+			PbTrackerPlugin.buildProfileUrl("Zulrah"));
+	}
+
+	@Test
+	public void buildsProfileUrlWithUrlEncodedSpaces()
+	{
+		assertEquals(
+			"https://osrs-pb-tracker-frontend.vercel.app/player/Blitzen+Jones",
+			PbTrackerPlugin.buildProfileUrl("Blitzen Jones"));
+	}
 }
