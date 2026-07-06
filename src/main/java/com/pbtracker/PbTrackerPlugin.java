@@ -14,6 +14,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.util.LinkBrowser;
 import net.runelite.client.util.Text;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -22,6 +23,9 @@ import okhttp3.Response;
 import javax.inject.Inject;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -79,6 +83,8 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SYNC_NOW_KEY = "syncNow";
 	private static final String SYNC_STATUS_KEY = "syncStatus";
 	private static final String DUMP_RAW_KEY = "dumpRawPbs";
+	private static final String OPEN_PROFILE_KEY = "openProfile";
+	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
 	// Matches any "Fastest <descriptor>: <value>" line on the Adventure Log
@@ -671,6 +677,24 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		return report.toString();
+	}
+
+	/**
+	 * Pure URL-building for the "open my profile" action - kept static and
+	 * side-effect-free (no Client, no LinkBrowser) so it's directly
+	 * unit-testable, same pattern as buildRawPbReport.
+	 */
+	static String buildProfileUrl(String playerName)
+	{
+		try
+		{
+			return PROFILE_SITE_URL + "/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8.name());
+		}
+		catch (UnsupportedEncodingException ex)
+		{
+			// UTF-8 is always supported; this branch is unreachable in practice.
+			throw new AssertionError(ex);
+		}
 	}
 
 	private void syncPbs(Map<String, Double> pbs)
