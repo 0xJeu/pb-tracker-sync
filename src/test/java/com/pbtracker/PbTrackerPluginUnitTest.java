@@ -137,4 +137,46 @@ public class PbTrackerPluginUnitTest
 			"https://osrs-pb-tracker-frontend.vercel.app/player/Blitzen%20Jones",
 			PbTrackerPlugin.buildProfileUrl("Blitzen Jones"));
 	}
+
+	@Test
+	public void resolvesCommonRaidShorthandToStoredBossKeys()
+	{
+		assertEquals("theatre of blood", PbTrackerPlugin.resolveBossAlias("tob"));
+		assertEquals("theatre of blood", PbTrackerPlugin.resolveBossAlias("ToB"));
+		assertEquals("chambers of xeric", PbTrackerPlugin.resolveBossAlias("cox"));
+		assertEquals("tombs of amascut", PbTrackerPlugin.resolveBossAlias("TOA"));
+		assertEquals("inferno", PbTrackerPlugin.resolveBossAlias("zuk"));
+		assertEquals("tzhaar fight cave", PbTrackerPlugin.resolveBossAlias("jad"));
+		assertEquals("the gauntlet", PbTrackerPlugin.resolveBossAlias("gaunt"));
+		assertEquals("the corrupted gauntlet", PbTrackerPlugin.resolveBossAlias("cg"));
+		assertEquals("phosani's nightmare", PbTrackerPlugin.resolveBossAlias("pnm"));
+	}
+
+	@Test
+	public void resolveBossAliasFallsBackToTrimmedLowercaseInput()
+	{
+		assertEquals("zulrah", PbTrackerPlugin.resolveBossAlias("Zulrah"));
+		assertEquals("vorkath", PbTrackerPlugin.resolveBossAlias("  vorkath  "));
+		assertEquals("some brand new boss", PbTrackerPlugin.resolveBossAlias("Some Brand New Boss"));
+	}
+
+	@Test
+	public void formatsTimeUnderAnHourAsMinutesAndSeconds()
+	{
+		assertEquals("2:05", PbTrackerPlugin.formatTime(125));
+		assertEquals("0:09", PbTrackerPlugin.formatTime(9));
+	}
+
+	@Test
+	public void formatsTimeOverAnHourWithHours()
+	{
+		assertEquals("1:00:00", PbTrackerPlugin.formatTime(3600));
+		assertEquals("1:40:28", PbTrackerPlugin.formatTime(6028));
+	}
+
+	@Test
+	public void formatsFractionalSecondsWhenPresent()
+	{
+		assertEquals("1:20.40", PbTrackerPlugin.formatTime(80.4));
+	}
 }

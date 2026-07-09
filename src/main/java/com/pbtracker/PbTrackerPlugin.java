@@ -4,11 +4,16 @@ import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.MessageNode;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatCommandManager;
+import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -116,6 +121,48 @@ public class PbTrackerPlugin extends Plugin
 		KNOWN_DUPLICATE_RAW_KEYS.put("nightmare", "The Nightmare");
 	}
 
+	private static final String PBR_COMMAND_STRING = "!pbr";
+
+	// Common shorthand -> the exact lowercase boss key the backend stores
+	// (i.e. what buildKey()/canonicalBossKey() above actually produce, once
+	// lowercased server-side). Anything not listed here just falls through
+	// to the raw, lowercased argument as typed, so "!pbr zulrah" or "!pbr
+	// vorkath" work without needing an entry - this map only exists for
+	// content whose stored key doesn't match what a player would naturally
+	// type (raid abbreviations, "the X" bosses, etc).
+	private static final Map<String, String> BOSS_ALIASES = new HashMap<>();
+	static
+	{
+		BOSS_ALIASES.put("tob", "theatre of blood");
+		BOSS_ALIASES.put("cox", "chambers of xeric");
+		BOSS_ALIASES.put("toa", "tombs of amascut");
+		BOSS_ALIASES.put("jad", "tzhaar fight cave");
+		BOSS_ALIASES.put("fc", "tzhaar fight cave");
+		BOSS_ALIASES.put("fightcave", "tzhaar fight cave");
+		BOSS_ALIASES.put("fightcaves", "tzhaar fight cave");
+		BOSS_ALIASES.put("fight caves", "tzhaar fight cave");
+		BOSS_ALIASES.put("zuk", "inferno");
+		BOSS_ALIASES.put("colo", "fortis colosseum");
+		BOSS_ALIASES.put("colosseum", "fortis colosseum");
+		BOSS_ALIASES.put("gaunt", "the gauntlet");
+		BOSS_ALIASES.put("gauntlet", "the gauntlet");
+		BOSS_ALIASES.put("cgaunt", "the corrupted gauntlet");
+		BOSS_ALIASES.put("cg", "the corrupted gauntlet");
+		BOSS_ALIASES.put("corrupted gauntlet", "the corrupted gauntlet");
+		BOSS_ALIASES.put("nm", "the nightmare");
+		BOSS_ALIASES.put("nightmare", "the nightmare");
+		BOSS_ALIASES.put("pnm", "phosani's nightmare");
+		BOSS_ALIASES.put("phosani", "phosani's nightmare");
+		BOSS_ALIASES.put("phosanis", "phosani's nightmare");
+		BOSS_ALIASES.put("huey", "the hueycoatl");
+		BOSS_ALIASES.put("hueycoatl", "the hueycoatl");
+		BOSS_ALIASES.put("levi", "leviathan");
+		BOSS_ALIASES.put("whisp", "whisperer");
+		BOSS_ALIASES.put("wisp", "whisperer");
+		BOSS_ALIASES.put("duke", "duke sucellus");
+		BOSS_ALIASES.put("vard", "vardorvis");
+	}
+
 	@Inject
 	private Client client;
 
@@ -127,6 +174,9 @@ public class PbTrackerPlugin extends Plugin
 
 	@Inject
 	private SyncClient syncClient;
+
+	@Inject
+	private ChatCommandManager chatCommandManager;
 
 	@Inject
 	private ScheduledExecutorService executor;
@@ -151,6 +201,7 @@ public class PbTrackerPlugin extends Plugin
 	protected void startUp()
 	{
 		installSecret = getOrCreateInstallSecret();
+		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 	}
 
 	/**
@@ -179,6 +230,7 @@ public class PbTrackerPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		chatCommandManager.unregisterCommand(PBR_COMMAND_STRING);
 	}
 
 	/**
@@ -341,6 +393,137 @@ public class PbTrackerPlugin extends Plugin
 			default:
 				return key;
 		}
+	}
+
+	/**
+	 * Resolves what a player types after "!pbr" (e.g. "tob", "ToB", "Zulrah")
+	 * to the exact lowercase boss key the backend stores it under. Falls
+	 * back to the trimmed, lowercased input unchanged when there's no
+	 * shorthand entry for it, so any boss's real name always works even if
+	 * it's not in BOSS_ALIASES.
+	 */
+	static String resolveBossAlias(String input)
+	{
+		String normalized = input.trim().toLowerCase();
+		return BOSS_ALIASES.getOrDefault(normalized, normalized);
+	}
+
+	/**
+	 * Same formatting as the website's formatTime() (frontend/src/lib/format.ts)
+	 * so a time read out in chat matches what's shown on the leaderboard.
+	 */
+	static String formatTime(double totalSeconds)
+	{
+		long h = (long) (totalSeconds / 3600);
+		long m = (long) ((totalSeconds % 3600) / 60);
+		double s = totalSeconds % 60;
+		boolean hasFraction = Math.abs(s - Math.round(s)) > 0.001;
+		String secStr = hasFraction
+			? String.format("%05.2f", s)
+			: String.format("%02d", Math.round(s));
+
+		if (h > 0)
+		{
+			return h + ":" + String.format("%02d", m) + ":" + secStr;
+		}
+		return m + ":" + secStr;
+	}
+
+	/**
+	 * Chat command handler for "!pbr <boss>" - looks up the local player's
+	 * synced personal best and leaderboard rank for that boss from the PB
+	 * tracker backend and prints it in chat. Registered via
+	 * registerCommandAsync, which RuneLite already runs off the client
+	 * thread, so the blocking SyncClient.lookupPlayer() call below is safe
+	 * here the same way RuneLite's own built-in "!lvl" hiscore lookup does
+	 * a blocking network call directly in its handler.
+	 */
+	private void pbrLookup(ChatMessage chatMessage, String message)
+	{
+		if (!config.pbrCommand())
+		{
+			return;
+		}
+
+		if (message.length() <= PBR_COMMAND_STRING.length())
+		{
+			respondPbr(chatMessage, "Usage: !pbr <boss>, e.g. !pbr tob");
+			return;
+		}
+
+		String rawArgument = message.substring(PBR_COMMAND_STRING.length() + 1).trim();
+		if (rawArgument.isEmpty())
+		{
+			respondPbr(chatMessage, "Usage: !pbr <boss>, e.g. !pbr tob");
+			return;
+		}
+
+		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		{
+			respondPbr(chatMessage, "Not logged in yet.");
+			return;
+		}
+
+		String boss = resolveBossAlias(rawArgument);
+		String playerName = client.getLocalPlayer().getName();
+
+		SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(playerName);
+		switch (result.kind)
+		{
+			case NOT_FOUND:
+				respondPbr(chatMessage, "No synced PB data found for " + playerName + " yet.");
+				return;
+			case AMBIGUOUS:
+				respondPbr(chatMessage, "Multiple synced accounts share this name - check the website directly.");
+				return;
+			case ERROR:
+				respondPbr(chatMessage, "PB Tracker lookup failed - try again later.");
+				return;
+			case FOUND:
+				break;
+		}
+
+		SyncClient.PbEntryDto match = null;
+		for (SyncClient.PbEntryDto pb : result.player.pbs)
+		{
+			if (pb.boss != null && pb.boss.equalsIgnoreCase(boss))
+			{
+				match = pb;
+				break;
+			}
+		}
+
+		if (match == null)
+		{
+			respondPbr(chatMessage, "No personal best recorded for \"" + rawArgument + "\".");
+			return;
+		}
+
+		String response = new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append("Personal best: ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(formatTime(match.timeSeconds))
+			.append(ChatColorType.NORMAL)
+			.append("  Rank: ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append("#" + match.rank)
+			.build();
+
+		MessageNode messageNode = chatMessage.getMessageNode();
+		messageNode.setRuneLiteFormatMessage(response);
+		client.refreshChat();
+	}
+
+	private void respondPbr(ChatMessage chatMessage, String text)
+	{
+		String formatted = new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append(text)
+			.build();
+		MessageNode messageNode = chatMessage.getMessageNode();
+		messageNode.setRuneLiteFormatMessage(formatted);
+		client.refreshChat();
 	}
 
 	@Subscribe
