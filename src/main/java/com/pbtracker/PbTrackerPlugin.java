@@ -11,7 +11,6 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.client.chat.ChatColorType;
 import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
@@ -26,6 +25,7 @@ import okhttp3.Callback;
 import okhttp3.Response;
 
 import javax.inject.Inject;
+import java.awt.Color;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
@@ -123,6 +123,17 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	private static final String PBR_COMMAND_STRING = "!pbr";
+
+	// Explicit colors for !pbr's chat output rather than ChatColorType.NORMAL/
+	// HIGHLIGHT - those defer to the player's own configured chat colors,
+	// which on some setups render nearly identically (e.g. both a similar
+	// blue), making the response hard to read at a glance. These give three
+	// clearly distinct colors regardless of client theme - white for labels,
+	// the PB Tracker site's own gold for the time, green for rank.
+	private static final Color PBR_LABEL_COLOR = new Color(255, 255, 255);
+	private static final Color PBR_TIME_COLOR = new Color(255, 152, 31);
+	private static final Color PBR_RANK_COLOR = new Color(0, 200, 83);
+	private static final Color PBR_ERROR_COLOR = new Color(255, 255, 255);
 
 	// Matches the part of a synced boss key after the raid's bare prefix has
 	// been stripped, e.g. for "theatre of blood - hard - fastest overall (4
@@ -694,16 +705,10 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		String response = new ChatMessageBuilder()
-			.append(ChatColorType.NORMAL)
-			.append(titleCase(match.boss))
-			.append(ChatColorType.NORMAL)
-			.append(" personal best: ")
-			.append(ChatColorType.HIGHLIGHT)
-			.append(formatTime(match.timeSeconds))
-			.append(ChatColorType.NORMAL)
-			.append("  Rank: ")
-			.append(ChatColorType.HIGHLIGHT)
-			.append("#" + match.rank)
+			.append(PBR_LABEL_COLOR, titleCase(match.boss) + " personal best: ")
+			.append(PBR_TIME_COLOR, formatTime(match.timeSeconds))
+			.append(PBR_LABEL_COLOR, "  Rank: ")
+			.append(PBR_RANK_COLOR, "#" + match.rank)
 			.build();
 
 		MessageNode messageNode = chatMessage.getMessageNode();
@@ -714,8 +719,7 @@ public class PbTrackerPlugin extends Plugin
 	private void respondPbr(ChatMessage chatMessage, String text)
 	{
 		String formatted = new ChatMessageBuilder()
-			.append(ChatColorType.NORMAL)
-			.append(text)
+			.append(PBR_ERROR_COLOR, text)
 			.build();
 		MessageNode messageNode = chatMessage.getMessageNode();
 		messageNode.setRuneLiteFormatMessage(formatted);
