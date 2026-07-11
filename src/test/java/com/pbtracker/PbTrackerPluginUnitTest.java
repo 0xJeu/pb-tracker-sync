@@ -195,16 +195,30 @@ public class PbTrackerPluginUnitTest
 	@Test
 	public void splitsTrailingNumericTokenAsTeamSize()
 	{
-		assertEquals("[tob, 4]", Arrays.toString(PbTrackerPlugin.splitBossAndSize("tob 4")));
-		assertEquals("[theatre of blood, 2]", Arrays.toString(PbTrackerPlugin.splitBossAndSize("theatre of blood 2")));
-		assertEquals("[tob, solo]", Arrays.toString(PbTrackerPlugin.splitBossAndSize("tob solo")));
+		assertEquals("[tob, 4, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob 4")));
+		assertEquals("[theatre of blood, 2, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("theatre of blood 2")));
+		assertEquals("[tob, solo, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob solo")));
 	}
 
 	@Test
 	public void doesNotMistakeMultiWordBossNamesForATeamSize()
 	{
-		assertEquals("[fight caves, null]", Arrays.toString(PbTrackerPlugin.splitBossAndSize("fight caves")));
-		assertEquals("[zulrah, null]", Arrays.toString(PbTrackerPlugin.splitBossAndSize("zulrah")));
+		assertEquals("[fight caves, null, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("fight caves")));
+		assertEquals("[zulrah, null, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("zulrah")));
+	}
+
+	@Test
+	public void splitsAnExplicitModeKeywordBeforeTheSize()
+	{
+		assertEquals("[tob, 2, entry]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob entry 2")));
+		assertEquals("[tob, 4, hard]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob hard 4")));
+		assertEquals("[chambers of xeric, 3, challenge mode]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("chambers of xeric challenge 3")));
+	}
+
+	@Test
+	public void splitsAModeKeywordWithNoSize()
+	{
+		assertEquals("[tob, null, entry]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob entry")));
 	}
 
 	private static SyncClient.PbEntryDto pb(String boss, double timeSeconds, int rank)
@@ -266,18 +280,36 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
-	public void requestingATeamSizeOnlyAvailableInAModeStillMatches()
+	public void defaultModeNeverFallsBackToADifferentModeEvenIfThatsAllThatExists()
 	{
-		// No Normal-mode "1 player" entry exists - only Entry mode does.
-		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "theatre of blood", "1", null);
+		// Only Entry mode has a "1 player" entry - Normal mode has none. With
+		// no mode requested, that means "give me Normal mode specifically",
+		// so this must return null rather than silently substituting Entry
+		// mode's record. Per George: "I wanna pull from normal mode, and if
+		// you need the entry times I want you to do pbr tob entry".
+		assertNull(PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "theatre of blood", "1", null));
+	}
+
+	@Test
+	public void explicitEntryModeKeywordMatchesTheEntryModeRecord()
+	{
+		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "theatre of blood", "1", "entry");
 		assertNotNull(match);
 		assertEquals("theatre of blood - entry - fastest overall (1 player entry mode)", match.boss);
 	}
 
 	@Test
-	public void requestingASoloTombsOfAmascutRecordMatches()
+	public void requestingASoloTombsOfAmascutRecordWithNoModeReturnsNullWhenOnlyEntryModeHasIt()
 	{
-		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "tombs of amascut", "solo", null);
+		// Fixture's only "solo" ToA entry is Entry mode's - same rule as
+		// ToB above, default (no mode given) means Normal mode specifically.
+		assertNull(PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "tombs of amascut", "solo", null));
+	}
+
+	@Test
+	public void requestingASoloTombsOfAmascutRecordWithEntryModeMatches()
+	{
+		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "tombs of amascut", "solo", "entry");
 		assertNotNull(match);
 		assertEquals("tombs of amascut - entry - fastest overall (solo)", match.boss);
 	}
@@ -289,15 +321,30 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
-	public void noSizeGivenReturnsFastestOverallAcrossAllModesAndSizesNotTheBareEntry()
+	public void noArgsGivenReturnsFastestNormalModeOverallNotTheBareEntry()
 	{
 		// The bare "theatre of blood" entry (73s) is the fastest raw number
 		// in the fixture, but it's not a real "Fastest Overall" record - the
-		// real fastest labeled one is the 4-player Normal-mode run at 1103s.
+		// real fastest labeled Normal-mode one is the 4-player run at 1103s.
 		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(TOB_COX_TOA_FIXTURE, "theatre of blood", null, null);
 		assertNotNull(match);
 		assertEquals("theatre of blood - fastest overall (4 player)", match.boss);
 		assertEquals(1103, match.timeSeconds, 0.001);
+	}
+
+	@Test
+	public void noArgsGivenNeverPicksAFasterOtherModeOverNormal()
+	{
+		// Hard mode is (implausibly, but for the test) faster than every
+		// Normal-mode entry - a bare "!pbr tob" must still mean Normal mode,
+		// not just whatever's fastest across all modes.
+		List<SyncClient.PbEntryDto> fixture = Arrays.asList(
+			pb("theatre of blood - fastest overall (4 player)", 1103, 10),
+			pb("theatre of blood - hard - fastest overall (4 player hard mode)", 500, 1)
+		);
+		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(fixture, "theatre of blood", null, null);
+		assertNotNull(match);
+		assertEquals("theatre of blood - fastest overall (4 player)", match.boss);
 	}
 
 	@Test

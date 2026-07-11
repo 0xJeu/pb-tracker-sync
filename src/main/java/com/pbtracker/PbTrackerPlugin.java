@@ -494,26 +494,58 @@ public class PbTrackerPlugin extends Plugin
 		return result.toString();
 	}
 
+	// Explicit mode keyword -> the exact mode text OVERALL_LABEL_PATTERN
+	// captures for it, for the "<boss> <mode> [size]" form (e.g. "tob entry
+	// 2", "cox challenge 3"). Separate from MODE_SPECIFIC_ALIASES, which is
+	// for single-word shortcuts naming both the raid and mode at once
+	// ("hmt", "cm") - this is for spelling the mode out after the boss.
+	private static final Map<String, String> MODE_KEYWORDS = new HashMap<>();
+	static
+	{
+		MODE_KEYWORDS.put("entry", "entry");
+		MODE_KEYWORDS.put("hard", "hard");
+		MODE_KEYWORDS.put("expert", "expert");
+		MODE_KEYWORDS.put("challenge", "challenge mode");
+	}
+
 	/**
-	 * Splits a !pbr argument into the boss part and an optional trailing
-	 * team-size token (a plain number, or "solo"), e.g. "tob 2" -> ("tob",
-	 * "2"), "fight caves" -> ("fight caves", null). Only the *last* token is
-	 * ever treated as a size, so multi-word boss names/aliases aren't
-	 * mistaken for one.
+	 * Splits a !pbr argument into the boss part, an optional trailing
+	 * team-size token (a plain number, or "solo"), and an optional mode
+	 * keyword (entry/hard/expert/challenge) that comes right before the
+	 * size, if any - e.g. "tob entry 2" -> ("tob", "2", "entry"), "tob 4" ->
+	 * ("tob", "4", null), "fight caves" -> ("fight caves", null, null). Only
+	 * the trailing tokens are ever consumed this way, so multi-word boss
+	 * names/aliases aren't mistaken for a size or mode.
 	 */
-	static String[] splitBossAndSize(String rawArgument)
+	static String[] splitBossSizeAndMode(String rawArgument)
 	{
 		String[] tokens = rawArgument.trim().split("\\s+");
-		if (tokens.length > 1)
+		int end = tokens.length;
+		String sizeArg = null;
+		String modeArg = null;
+
+		if (end > 1)
 		{
-			String last = tokens[tokens.length - 1].toLowerCase();
+			String last = tokens[end - 1].toLowerCase();
 			if (last.matches("\\d+") || last.equals("solo"))
 			{
-				String bossPart = String.join(" ", Arrays.copyOfRange(tokens, 0, tokens.length - 1));
-				return new String[] { bossPart, last };
+				sizeArg = last;
+				end--;
 			}
 		}
-		return new String[] { rawArgument.trim(), null };
+
+		if (end > 1)
+		{
+			String mapped = MODE_KEYWORDS.get(tokens[end - 1].toLowerCase());
+			if (mapped != null)
+			{
+				modeArg = mapped;
+				end--;
+			}
+		}
+
+		String bossPart = String.join(" ", Arrays.copyOfRange(tokens, 0, end));
+		return new String[] { bossPart, sizeArg, modeArg };
 	}
 
 	private static boolean parenMatchesSize(String paren, String sizeArg)
@@ -526,33 +558,29 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	/**
-	 * Picks which synced PB entry !pbr should report for a resolved boss key
-	 * and optional team size.
+	 * Picks which synced PB entry !pbr should report for a resolved boss key,
+	 * optional team size, and optional mode.
 	 * <p>
-	 * With a size given (e.g. "tob 4"): only "Fastest Overall" entries for
-	 * that exact team size are considered, across any raid mode (Normal/
-	 * Entry/Hard/Challenge) - preferring the mode-neutral (Normal) one if
-	 * more than one mode has that size, otherwise the fastest among them.
-	 * Returns null if nothing matches that size at all, rather than falling
-	 * back to an unrelated record.
+	 * requiredMode is null unless the player asked for a specific mode
+	 * (either via a MODE_SPECIFIC_ALIASES shorthand like "hmt"/"cm", or the
+	 * explicit "<boss> <mode> [size]" form like "tob entry 2"). Whichever it
+	 * is - null or a specific mode - only entries with THAT EXACT mode
+	 * segment are considered; there's no falling back to a different mode
+	 * than what was asked for. null specifically means "no mode segment at
+	 * all", i.e. true Normal mode - not "any mode", so "!pbr tob 1" (Normal
+	 * ToB has no solo/duo size) returns null rather than silently
+	 * substituting Entry mode's "1 player" record.
 	 * <p>
-	 * With no size given: considers every "Fastest Overall" entry for the
-	 * boss across every team size/mode and returns the single fastest one -
-	 * that's the time a player means by "my personal best" for a raid.
-	 * Falls back to an exact match on the bare boss key only if there are no
-	 * "Fastest Overall" entries at all (non-raid bosses, or a raid the
-	 * player only has a legacy/unlabeled record for).
-	 * <p>
-	 * If requiredMode is given (from a MODE_SPECIFIC_ALIASES shorthand like
-	 * "hmt" or "cm"), only entries whose mode segment matches it are
-	 * considered at all - no mode-neutral preference, no bare-key fallback,
-	 * since the player explicitly asked for that one mode.
+	 * Only when NEITHER a size NOR a mode was given at all (a bare "!pbr
+	 * <boss>") does this fall back further: first to the single fastest
+	 * Normal-mode "Fastest Overall" entry across every team size, and only
+	 * if there's none of those either, to an exact match on the bare boss
+	 * key (non-raid bosses, or a raid the player only has a legacy/
+	 * unlabeled record for).
 	 */
 	static SyncClient.PbEntryDto findPbrMatch(List<SyncClient.PbEntryDto> pbs, String boss, String sizeArg, String requiredMode)
 	{
-		List<SyncClient.PbEntryDto> modeNeutral = new ArrayList<>();
-		List<SyncClient.PbEntryDto> anyMode = new ArrayList<>();
-		List<SyncClient.PbEntryDto> requiredModeOnly = new ArrayList<>();
+		List<SyncClient.PbEntryDto> candidates = new ArrayList<>();
 
 		for (SyncClient.PbEntryDto pb : pbs)
 		{
@@ -573,36 +601,22 @@ public class PbTrackerPlugin extends Plugin
 			}
 
 			String mode = matcher.group("mode");
-
-			if (requiredMode != null)
+			boolean modeMatches = requiredMode == null ? mode == null : mode != null && mode.equalsIgnoreCase(requiredMode);
+			if (!modeMatches)
 			{
-				if (mode != null && mode.equalsIgnoreCase(requiredMode))
-				{
-					requiredModeOnly.add(pb);
-				}
 				continue;
 			}
 
-			anyMode.add(pb);
-			if (mode == null)
-			{
-				modeNeutral.add(pb);
-			}
+			candidates.add(pb);
 		}
 
-		if (requiredMode != null)
-		{
-			return fastest(requiredModeOnly);
-		}
-
-		List<SyncClient.PbEntryDto> candidates = (sizeArg != null && !modeNeutral.isEmpty()) ? modeNeutral : anyMode;
 		SyncClient.PbEntryDto best = fastest(candidates);
 		if (best != null)
 		{
 			return best;
 		}
 
-		if (sizeArg != null)
+		if (sizeArg != null || requiredMode != null)
 		{
 			return null;
 		}
@@ -653,14 +667,14 @@ public class PbTrackerPlugin extends Plugin
 
 		if (message.length() <= PBR_COMMAND_STRING.length())
 		{
-			respondPbr(chatMessage, "Usage: !pbr <boss> [team size], e.g. !pbr tob or !pbr tob 4");
+			respondPbr(chatMessage, "Usage: !pbr <boss> [mode] [team size], e.g. !pbr tob, !pbr tob 4, !pbr tob entry 2, or !pbr hmt");
 			return;
 		}
 
 		String rawArgument = message.substring(PBR_COMMAND_STRING.length() + 1).trim();
 		if (rawArgument.isEmpty())
 		{
-			respondPbr(chatMessage, "Usage: !pbr <boss> [team size], e.g. !pbr tob or !pbr tob 4");
+			respondPbr(chatMessage, "Usage: !pbr <boss> [mode] [team size], e.g. !pbr tob, !pbr tob 4, !pbr tob entry 2, or !pbr hmt");
 			return;
 		}
 
@@ -670,13 +684,14 @@ public class PbTrackerPlugin extends Plugin
 			return;
 		}
 
-		String[] bossAndSize = splitBossAndSize(rawArgument);
-		String bossArg = bossAndSize[0];
-		String sizeArg = bossAndSize[1];
+		String[] parsed = splitBossSizeAndMode(rawArgument);
+		String bossArg = parsed[0];
+		String sizeArg = parsed[1];
+		String parsedMode = parsed[2];
 
 		String[] modeAlias = MODE_SPECIFIC_ALIASES.get(bossArg.trim().toLowerCase());
 		String boss = modeAlias != null ? modeAlias[0] : resolveBossAlias(bossArg);
-		String requiredMode = modeAlias != null ? modeAlias[1] : null;
+		String requiredMode = modeAlias != null ? modeAlias[1] : parsedMode;
 
 		String playerName = client.getLocalPlayer().getName();
 
