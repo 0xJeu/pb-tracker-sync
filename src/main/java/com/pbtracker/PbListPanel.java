@@ -8,9 +8,11 @@ import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
+import java.awt.Rectangle;
 import java.util.List;
 import java.util.function.BiConsumer;
 
@@ -20,8 +22,16 @@ import java.util.function.BiConsumer;
  * website's boss picker) with everything else shown flat - reused by both
  * the "My PBs" and "Player Search" tabs, since they display the same kind of
  * data.
+ * <p>
+ * Implements Scrollable so the enclosing JScrollPane's JViewport clamps this
+ * panel's width to the actual visible width instead of using its raw (and,
+ * because of the wrapped JTextArea headings/detail lines, misleadingly wide)
+ * preferred size - without this, a plain JPanel isn't Scrollable-aware, so
+ * the viewport just takes the view's inflated preferred width verbatim,
+ * which is what let long headings force the whole panel wider instead of
+ * wrapping.
  */
-class PbListPanel extends JPanel
+class PbListPanel extends JPanel implements Scrollable
 {
 	private final JPanel rowsContainer = new JPanel();
 
@@ -33,6 +43,36 @@ class PbListPanel extends JPanel
 		rowsContainer.setLayout(new BoxLayout(rowsContainer, BoxLayout.Y_AXIS));
 		rowsContainer.setBackground(PbTrackerTheme.BG);
 		add(rowsContainer, BorderLayout.NORTH);
+	}
+
+	@Override
+	public Dimension getPreferredScrollableViewportSize()
+	{
+		return getPreferredSize();
+	}
+
+	@Override
+	public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
+	{
+		return 16;
+	}
+
+	@Override
+	public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+	{
+		return visibleRect.height;
+	}
+
+	@Override
+	public boolean getScrollableTracksViewportWidth()
+	{
+		return true;
+	}
+
+	@Override
+	public boolean getScrollableTracksViewportHeight()
+	{
+		return false;
 	}
 
 	void showMessage(String text)
