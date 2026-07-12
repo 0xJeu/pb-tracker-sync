@@ -1,6 +1,5 @@
 package com.pbtracker;
 
-import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
 import javax.swing.JTabbedPane;
@@ -27,14 +26,14 @@ class PbTrackerSidePanel extends PluginPanel
 	PbTrackerSidePanel(SyncClient syncClient)
 	{
 		super(false);
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBackground(PbTrackerTheme.BG);
 		setLayout(new BorderLayout());
 
 		bossesTab = new BossesTab(syncClient, this::jumpToSearch);
 		myPbsTab = new MyPbsTab(syncClient, this::jumpToBoss);
 		searchTab = new PlayerSearchTab(syncClient, this::jumpToBoss);
 
-		tabs.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		tabs.setBackground(PbTrackerTheme.BG);
 		tabs.setForeground(java.awt.Color.WHITE);
 		tabs.addTab("My PBs", myPbsTab);
 		tabs.addTab("Search", searchTab);
@@ -73,7 +72,7 @@ class PbTrackerSidePanel extends PluginPanel
 		bossesTab.setBosses(bosses);
 	}
 
-	/** Called by the right-click "Lookup PB Tracker" menu option. */
+	/** Called by the right-click "Search PB" menu option. */
 	void lookupPlayer(String name)
 	{
 		tabs.setSelectedComponent(searchTab);

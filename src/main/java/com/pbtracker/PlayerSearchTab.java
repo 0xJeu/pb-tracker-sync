@@ -1,12 +1,12 @@
 package com.pbtracker;
 
-import net.runelite.client.ui.ColorScheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.event.ActionListener;
@@ -29,14 +29,14 @@ class PlayerSearchTab extends JPanel
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
 		setLayout(new BorderLayout());
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBackground(PbTrackerTheme.BG);
 
 		JPanel searchBar = new JPanel(new BorderLayout(6, 0));
-		searchBar.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		searchBar.setBackground(PbTrackerTheme.BG);
 		searchBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-		searchField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchField.setForeground(java.awt.Color.WHITE);
+		searchField.setBackground(PbTrackerTheme.PANEL);
+		searchField.setForeground(PbTrackerTheme.TEXT);
 		ActionListener search = e -> doSearch();
 		searchField.addActionListener(search);
 
@@ -50,6 +50,7 @@ class PlayerSearchTab extends JPanel
 
 		JScrollPane scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
+		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
 		add(scrollPane, BorderLayout.CENTER);
 
@@ -66,7 +67,7 @@ class PlayerSearchTab extends JPanel
 		searchFor(name);
 	}
 
-	/** Also used by the right-click "Lookup PB Tracker" menu option, which switches to this tab and searches directly. */
+	/** Also used by the right-click "Search PB" menu option, which switches to this tab and searches directly. */
 	void searchFor(String name)
 	{
 		searchField.setText(name);

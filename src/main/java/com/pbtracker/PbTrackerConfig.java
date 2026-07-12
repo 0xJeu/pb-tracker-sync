@@ -104,7 +104,7 @@ public interface PbTrackerConfig extends Config
 	@ConfigItem(
 		keyName = "rightClickLookup",
 		name = "Right-click PB lookup",
-		description = "Add a \"Lookup PB Tracker\" right-click option on other players, matching the in-game "
+		description = "Add a \"Search PB\" right-click option on other players, matching the in-game "
 			+ "hiscore lookup option - opens the side panel's Search tab with their PBs.",
 		position = 8
 	)

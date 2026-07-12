@@ -371,30 +371,63 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	/**
-	 * Adds a "Lookup PB Tracker" right-click option on other players,
-	 * matching the in-game hiscore lookup convention. Anchored on "Follow"
-	 * since that option is present on every player's menu (including in the
-	 * players-nearby list), so this only adds the entry once per menu
-	 * rather than once per existing option.
+	 * Adds a "Search PB" right-click option on other players,
+	 * matching RuneLite's own built-in hiscore lookup plugin (see
+	 * HiscorePlugin.onMenuEntryAdded, which this mirrors) - covers players
+	 * in the world/nearby list (anchored on "Follow", present on every
+	 * player's menu there) as well as names in Friends, Friends Chat, the
+	 * chatbox, the ignore list, and private messages (anchored on whichever
+	 * option those widgets already show, since they're text entries with no
+	 * attached Player object to check).
 	 */
 	@Subscribe
 	public void onMenuEntryAdded(MenuEntryAdded event)
 	{
-		if (!config.rightClickLookup() || sidePanel == null || !"Follow".equals(event.getOption()))
+		if (!config.rightClickLookup() || sidePanel == null)
 		{
 			return;
 		}
 
+		String option = event.getOption();
 		MenuEntry entry = event.getMenuEntry();
-		Player player = entry.getPlayer();
-		if (player == null || player.getName() == null)
+
+		if ("Follow".equals(option))
+		{
+			Player player = entry.getPlayer();
+			if (player != null && player.getName() != null)
+			{
+				addLookupMenuEntry(entry, player.getName());
+			}
+			return;
+		}
+
+		if (event.getType() != MenuAction.CC_OP.getId() && event.getType() != MenuAction.CC_OP_LOW_PRIORITY.getId())
 		{
 			return;
 		}
 
-		String playerName = player.getName();
+		int componentId = event.getActionParam1();
+		int groupId = net.runelite.api.widgets.WidgetUtil.componentToInterface(componentId);
+
+		boolean isPlayerNameMenu =
+			groupId == InterfaceID.FRIENDS && option.equals("Delete")
+				|| groupId == InterfaceID.CHATCHANNEL_CURRENT && (option.equals("Add ignore") || option.equals("Remove friend"))
+				|| groupId == InterfaceID.CHATBOX && (option.equals("Add ignore") || option.equals("Message"))
+				|| groupId == InterfaceID.IGNORE && option.equals("Delete")
+				|| groupId == InterfaceID.PM_CHAT && (option.equals("Add ignore") || option.equals("Message"));
+
+		if (!isPlayerNameMenu)
+		{
+			return;
+		}
+
+		addLookupMenuEntry(entry, Text.removeTags(entry.getTarget()));
+	}
+
+	private void addLookupMenuEntry(MenuEntry entry, String playerName)
+	{
 		client.getMenu().createMenuEntry(-1)
-			.setOption("Lookup PB Tracker")
+			.setOption("Search PB")
 			.setTarget(entry.getTarget())
 			.setType(MenuAction.RUNELITE)
 			.onClick(e -> sidePanel.lookupPlayer(playerName));

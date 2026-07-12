@@ -1,11 +1,12 @@
 package com.pbtracker;
 
-import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -17,9 +18,12 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
@@ -31,17 +35,29 @@ import java.util.function.Consumer;
  * "Bosses" tab - pick a boss (raids collapse into one entry with a
  * mode/team-size drill-down, matching the website's boss picker), then see
  * its leaderboard.
+ * <p>
+ * The picker (search box + list) collapses into a single "change boss" bar
+ * once something is selected, matching the website's own collapsed-combobox
+ * pattern - keeps the sidebar's limited vertical space for the leaderboard
+ * instead of a permanently-open list.
  */
 class BossesTab extends JPanel
 {
+	private static final String PLACEHOLDER = "Search bosses...";
+
 	private final SyncClient syncClient;
 	private final Consumer<String> onPlayerClick;
 
 	private final DefaultListModel<PickerEntry> listModel = new DefaultListModel<>();
 	private final JList<PickerEntry> pickerList = new JList<>(listModel);
+	private final JTextField filterField = new JTextField(PLACEHOLDER);
+	private final JScrollPane pickerScroll;
+	private final JPanel pickerSection = new JPanel(new BorderLayout());
+
+	private final JLabel selectedBossBar = new JLabel();
 	private final JPanel drillDownPanel = new JPanel();
 	private final JPanel leaderboardRows = new JPanel();
-	private final JLabel leaderboardTitle = new JLabel(" ");
+	private final javax.swing.JTextArea leaderboardTitle = new javax.swing.JTextArea(" ");
 
 	private List<String> allBosses = List.of();
 	private String pendingHighlight;
@@ -58,12 +74,6 @@ class BossesTab extends JPanel
 			this.isRaidBase = isRaidBase;
 			this.key = key;
 		}
-
-		@Override
-		public String toString()
-		{
-			return label;
-		}
 	}
 
 	BossesTab(SyncClient syncClient, Consumer<String> onPlayerClick)
@@ -71,40 +81,109 @@ class BossesTab extends JPanel
 		this.syncClient = syncClient;
 		this.onPlayerClick = onPlayerClick;
 		setLayout(new BorderLayout());
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBackground(PbTrackerTheme.BG);
 
 		JPanel top = new JPanel(new BorderLayout());
-		top.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		top.setBackground(PbTrackerTheme.BG);
 
-		JTextField filterField = new JTextField();
-		filterField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		filterField.setForeground(Color.WHITE);
-		filterField.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		setUpFilterField();
+		setUpPickerList();
+		pickerScroll = new JScrollPane(pickerList);
+		pickerScroll.setBorder(BorderFactory.createEmptyBorder());
+		pickerScroll.setHorizontalScrollBarPolicy(javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		pickerScroll.setPreferredSize(new Dimension(0, 160));
+
+		pickerSection.setBackground(PbTrackerTheme.BG);
+		pickerSection.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
+		pickerSection.add(filterField, BorderLayout.NORTH);
+		pickerSection.add(pickerScroll, BorderLayout.CENTER);
+
+		setUpSelectedBossBar();
+
+		top.add(pickerSection, BorderLayout.NORTH);
+		top.add(selectedBossBar, BorderLayout.CENTER);
+
+		drillDownPanel.setLayout(new BoxLayout(drillDownPanel, BoxLayout.Y_AXIS));
+		drillDownPanel.setBackground(PbTrackerTheme.BG);
+		drillDownPanel.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
+		top.add(drillDownPanel, BorderLayout.SOUTH);
+
+		add(top, BorderLayout.NORTH);
+		add(buildLeaderboardScroll(), BorderLayout.CENTER);
+
+		showPicker();
+	}
+
+	private void setUpFilterField()
+	{
+		filterField.setBackground(PbTrackerTheme.PANEL);
+		filterField.setForeground(PbTrackerTheme.TEXT_DIM);
+		filterField.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER),
+			BorderFactory.createEmptyBorder(6, 8, 6, 8)
+		));
+		// Vanilla Swing has no built-in placeholder text support - fake it
+		// by swapping the text/color in and out on focus, same idea as a
+		// browser input's placeholder attribute.
+		filterField.addFocusListener(new FocusAdapter()
+		{
+			@Override
+			public void focusGained(FocusEvent e)
+			{
+				if (filterField.getText().equals(PLACEHOLDER))
+				{
+					filterField.setText("");
+					filterField.setForeground(PbTrackerTheme.TEXT);
+				}
+			}
+
+			@Override
+			public void focusLost(FocusEvent e)
+			{
+				if (filterField.getText().isEmpty())
+				{
+					filterField.setText(PLACEHOLDER);
+					filterField.setForeground(PbTrackerTheme.TEXT_DIM);
+				}
+			}
+		});
 		filterField.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
 			public void insertUpdate(DocumentEvent e)
 			{
-				applyFilter(filterField.getText());
+				applyFilter(currentFilterText());
 			}
 
 			@Override
 			public void removeUpdate(DocumentEvent e)
 			{
-				applyFilter(filterField.getText());
+				applyFilter(currentFilterText());
 			}
 
 			@Override
 			public void changedUpdate(DocumentEvent e)
 			{
-				applyFilter(filterField.getText());
+				applyFilter(currentFilterText());
 			}
 		});
+	}
 
-		pickerList.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		pickerList.setForeground(Color.WHITE);
+	private String currentFilterText()
+	{
+		String text = filterField.getText();
+		return text.equals(PLACEHOLDER) ? "" : text;
+	}
+
+	private void setUpPickerList()
+	{
+		pickerList.setBackground(PbTrackerTheme.PANEL);
+		pickerList.setForeground(PbTrackerTheme.TEXT);
 		pickerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-		pickerList.setVisibleRowCount(6);
+		pickerList.setSelectionBackground(PbTrackerTheme.HIGHLIGHT_BG);
+		pickerList.setSelectionForeground(PbTrackerTheme.GOLD_LIGHT);
+		pickerList.setFixedCellHeight(26);
+		pickerList.setCellRenderer(new PickerEntryRenderer());
 		pickerList.addListSelectionListener(e ->
 		{
 			if (!e.getValueIsAdjusting() && pickerList.getSelectedValue() != null)
@@ -112,34 +191,92 @@ class BossesTab extends JPanel
 				onPickerSelection(pickerList.getSelectedValue());
 			}
 		});
-		JScrollPane pickerScroll = new JScrollPane(pickerList);
-		pickerScroll.setPreferredSize(new Dimension(0, 140));
+	}
 
-		top.add(filterField, BorderLayout.NORTH);
-		top.add(pickerScroll, BorderLayout.CENTER);
+	/** Bold + a "raid" marker for raid bases, plain for everything else, proper padding either way. */
+	private static final class PickerEntryRenderer extends DefaultListCellRenderer
+	{
+		@Override
+		public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus)
+		{
+			JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+			PickerEntry entry = (PickerEntry) value;
+			label.setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 10));
+			if (entry.isRaidBase)
+			{
+				// Plain ASCII rather than a Unicode arrow - see the chevron
+				// comment in PbListPanel for why RuneLite's bitmap font can't
+				// render "▸".
+				label.setText(entry.label + "  >");
+				label.setFont(FontManager.getRunescapeBoldFont());
+			}
+			else
+			{
+				label.setText(entry.label);
+				label.setFont(FontManager.getRunescapeFont());
+			}
+			return label;
+		}
+	}
 
-		drillDownPanel.setLayout(new BoxLayout(drillDownPanel, BoxLayout.Y_AXIS));
-		drillDownPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		top.add(drillDownPanel, BorderLayout.SOUTH);
+	private void setUpSelectedBossBar()
+	{
+		selectedBossBar.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		selectedBossBar.setFont(FontManager.getRunescapeBoldFont());
+		selectedBossBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		selectedBossBar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		selectedBossBar.setToolTipText("Click to change boss");
+		selectedBossBar.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				showPicker();
+			}
+		});
+	}
 
-		add(top, BorderLayout.NORTH);
+	private void showPicker()
+	{
+		pickerSection.setVisible(true);
+		selectedBossBar.setVisible(false);
+		revalidate();
+		repaint();
+	}
 
-		leaderboardTitle.setForeground(PbListPanel.GOLD);
+	private void showSelectedBossBar(String label)
+	{
+		selectedBossBar.setText(label + "   (change)");
+		pickerSection.setVisible(false);
+		selectedBossBar.setVisible(true);
+		revalidate();
+		repaint();
+	}
+
+	private JScrollPane buildLeaderboardScroll()
+	{
+		leaderboardTitle.setEditable(false);
+		leaderboardTitle.setFocusable(false);
+		leaderboardTitle.setLineWrap(true);
+		leaderboardTitle.setWrapStyleWord(true);
+		leaderboardTitle.setOpaque(false);
+		leaderboardTitle.setForeground(PbTrackerTheme.GOLD);
 		leaderboardTitle.setFont(FontManager.getRunescapeBoldFont());
-		leaderboardTitle.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
+		leaderboardTitle.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
 
 		leaderboardRows.setLayout(new BoxLayout(leaderboardRows, BoxLayout.Y_AXIS));
-		leaderboardRows.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		leaderboardRows.setBackground(PbTrackerTheme.BG);
 
 		JPanel leaderboardContainer = new JPanel(new BorderLayout());
-		leaderboardContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		leaderboardContainer.setBackground(PbTrackerTheme.BG);
 		leaderboardContainer.add(leaderboardTitle, BorderLayout.NORTH);
 		leaderboardContainer.add(leaderboardRows, BorderLayout.CENTER);
 
 		JScrollPane leaderboardScroll = new JScrollPane(leaderboardContainer);
 		leaderboardScroll.setBorder(null);
+		leaderboardScroll.setHorizontalScrollBarPolicy(javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		leaderboardScroll.getVerticalScrollBar().setUnitIncrement(16);
-		add(leaderboardScroll, BorderLayout.CENTER);
+		return leaderboardScroll;
 	}
 
 	/** Called once bosses are fetched (on panel open) and whenever the picker needs repopulating. */
@@ -185,6 +322,7 @@ class BossesTab extends JPanel
 	private void onPickerSelection(PickerEntry entry)
 	{
 		drillDownPanel.removeAll();
+		showSelectedBossBar(entry.label);
 
 		if (!entry.isRaidBase)
 		{
@@ -201,13 +339,19 @@ class BossesTab extends JPanel
 		}
 
 		JPanel modeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		modeRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		modeRow.setBackground(PbTrackerTheme.BG);
 		JPanel sizeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		sizeRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		sizeRow.setBackground(PbTrackerTheme.BG);
 
+		List<JLabel> modeLabels = new ArrayList<>();
 		for (BossGroups.RaidMode mode : modes)
 		{
-			JLabel modeLabel = clickableLabel(mode.modeLabel, () -> selectMode(mode, entry.label, sizeRow));
+			JLabel modeLabel = clickableLabel(mode.modeLabel, () ->
+			{
+				setActiveLabel(modeLabels, modeLabels.get(modes.indexOf(mode)));
+				selectMode(mode, entry.label, sizeRow);
+			});
+			modeLabels.add(modeLabel);
 			modeRow.add(modeLabel);
 		}
 
@@ -217,16 +361,22 @@ class BossesTab extends JPanel
 		drillDownPanel.repaint();
 
 		// Auto-select the first mode so a leaderboard shows immediately.
+		setActiveLabel(modeLabels, modeLabels.get(0));
 		selectMode(modes.get(0), entry.label, sizeRow);
 	}
 
 	private void selectMode(BossGroups.RaidMode mode, String raidLabel, JPanel sizeRow)
 	{
 		sizeRow.removeAll();
+		List<JLabel> sizeLabels = new ArrayList<>();
 		for (BossGroups.KeyLabel variant : mode.variants)
 		{
-			JLabel sizeLabel = clickableLabel(variant.label,
-				() -> loadLeaderboard(variant.key, raidLabel + " - " + mode.modeLabel + " - " + variant.label));
+			JLabel sizeLabel = clickableLabel(variant.label, () ->
+			{
+				setActiveLabel(sizeLabels, sizeLabels.get(mode.variants.indexOf(variant)));
+				loadLeaderboard(variant.key, raidLabel + " - " + mode.modeLabel + " - " + variant.label);
+			});
+			sizeLabels.add(sizeLabel);
 			sizeRow.add(sizeLabel);
 		}
 		sizeRow.revalidate();
@@ -235,17 +385,36 @@ class BossesTab extends JPanel
 		if (!mode.variants.isEmpty())
 		{
 			BossGroups.KeyLabel first = mode.variants.get(0);
+			setActiveLabel(sizeLabels, sizeLabels.get(0));
 			loadLeaderboard(first.key, raidLabel + " - " + mode.modeLabel + " - " + first.label);
+		}
+	}
+
+	/** Marks one label in the row as the active selection (gold border/text), clearing the others. */
+	private void setActiveLabel(List<JLabel> labels, JLabel active)
+	{
+		for (JLabel label : labels)
+		{
+			boolean isActive = label == active;
+			label.setBackground(isActive ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
+			label.setForeground(isActive ? PbTrackerTheme.GOLD_LIGHT : PbTrackerTheme.TEXT);
+			label.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(isActive ? PbTrackerTheme.GOLD : PbTrackerTheme.PANEL_BORDER),
+				BorderFactory.createEmptyBorder(3, 8, 3, 8)
+			));
 		}
 	}
 
 	private JLabel clickableLabel(String text, Runnable onClick)
 	{
 		JLabel label = new JLabel(text);
-		label.setForeground(Color.WHITE);
-		label.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
+		label.setForeground(PbTrackerTheme.TEXT);
+		label.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER),
+			BorderFactory.createEmptyBorder(3, 8, 3, 8)
+		));
 		label.setOpaque(true);
-		label.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		label.setBackground(PbTrackerTheme.PANEL);
 		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		label.addMouseListener(new MouseAdapter()
 		{
@@ -263,7 +432,7 @@ class BossesTab extends JPanel
 		leaderboardTitle.setText(title);
 		leaderboardRows.removeAll();
 		JLabel loading = new JLabel("Loading...");
-		loading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		loading.setForeground(PbTrackerTheme.TEXT_DIM);
 		leaderboardRows.add(loading);
 		leaderboardRows.revalidate();
 		leaderboardRows.repaint();
@@ -284,13 +453,13 @@ class BossesTab extends JPanel
 		if (rows == null)
 		{
 			JLabel error = new JLabel("Lookup failed - try again later.");
-			error.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			error.setForeground(PbTrackerTheme.TEXT_DIM);
 			leaderboardRows.add(error);
 		}
 		else if (rows.isEmpty())
 		{
 			JLabel empty = new JLabel("No synced PBs for this boss yet.");
-			empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			empty.setForeground(PbTrackerTheme.TEXT_DIM);
 			leaderboardRows.add(empty);
 		}
 		else
@@ -306,25 +475,51 @@ class BossesTab extends JPanel
 		leaderboardRows.repaint();
 	}
 
+	// Gold/silver/bronze for the top 3, matching a medal-podium convention -
+	// no real crown/medal image assets available, so color-coding the rank
+	// number itself stands in for the mockup's crown icons.
+	private static String rankBadge(int rank)
+	{
+		return "#" + rank;
+	}
+
+	private static Color rankColor(int rank)
+	{
+		switch (rank)
+		{
+			case 1:
+				return PbTrackerTheme.RANK_GOLD;
+			case 2:
+				return PbTrackerTheme.RANK_SILVER;
+			case 3:
+				return PbTrackerTheme.RANK_BRONZE;
+			default:
+				return PbTrackerTheme.TEXT;
+		}
+	}
+
 	private JPanel buildLeaderboardRow(int rank, SyncClient.LeaderboardRow row, boolean isHighlighted)
 	{
 		JPanel panel = new JPanel(new BorderLayout(8, 0));
-		panel.setBackground(isHighlighted ? new Color(0x3A, 0x2A, 0x10) : ColorScheme.DARKER_GRAY_COLOR);
-		panel.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARK_GRAY_COLOR),
-			BorderFactory.createEmptyBorder(6, 10, 6, 10)
-		));
-		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getMaximumSize().height));
+		panel.setBackground(isHighlighted ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
 		panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-		JLabel rankAndName = new JLabel("#" + rank + "  " + row.displayName);
-		rankAndName.setForeground(isHighlighted ? PbListPanel.GOLD : Color.WHITE);
+		JLabel rankAndName = new JLabel(rankBadge(rank) + "  " + row.displayName);
+		rankAndName.setForeground(isHighlighted ? PbTrackerTheme.GOLD : rankColor(rank));
 
 		JLabel time = new JLabel(PbTrackerPlugin.formatTime(row.timeSeconds));
-		time.setForeground(PbListPanel.GOLD_LIGHT);
+		time.setForeground(PbTrackerTheme.GOLD_LIGHT);
 
 		panel.add(rankAndName, BorderLayout.WEST);
 		panel.add(time, BorderLayout.EAST);
+
+		// Measured after both labels are added - see PbListPanel's
+		// buildRowContainer() comment for why order matters here.
+		panel.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 1, 0, PbTrackerTheme.BG),
+			BorderFactory.createEmptyBorder(6, 10, 6, 10)
+		));
+		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
 
 		panel.addMouseListener(new MouseAdapter()
 		{
@@ -341,6 +536,10 @@ class BossesTab extends JPanel
 	void showBossHighlighted(String bossKey, String highlightPlayerName)
 	{
 		pendingHighlight = highlightPlayerName;
+		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey));
+		drillDownPanel.removeAll();
+		drillDownPanel.revalidate();
+		drillDownPanel.repaint();
 		loadLeaderboard(bossKey, PbTrackerPlugin.titleCase(bossKey));
 	}
 }

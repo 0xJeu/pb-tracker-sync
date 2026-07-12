@@ -1,9 +1,8 @@
 package com.pbtracker;
 
-import net.runelite.client.ui.ColorScheme;
-
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.util.function.BiConsumer;
@@ -24,10 +23,11 @@ class MyPbsTab extends JPanel
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
 		setLayout(new BorderLayout());
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBackground(PbTrackerTheme.BG);
 
 		JScrollPane scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
+		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
 		add(scrollPane, BorderLayout.CENTER);
 
