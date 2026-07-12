@@ -4,10 +4,14 @@ import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.MessageNode;
+import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
@@ -219,6 +223,12 @@ public class PbTrackerPlugin extends Plugin
 	@Inject
 	private ScheduledExecutorService executor;
 
+	@Inject
+	private net.runelite.client.ui.ClientToolbar clientToolbar;
+
+	private PbTrackerSidePanel sidePanel;
+	private net.runelite.client.ui.NavigationButton navButton;
+
 	private String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
@@ -240,6 +250,50 @@ public class PbTrackerPlugin extends Plugin
 	{
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
+
+		sidePanel = new PbTrackerSidePanel(syncClient);
+		navButton = net.runelite.client.ui.NavigationButton.builder()
+			.tooltip("PB Tracker")
+			.icon(buildNavIcon())
+			.priority(5)
+			.panel(sidePanel)
+			.build();
+		clientToolbar.addNavigation(navButton);
+
+		refreshBossList();
+	}
+
+	/**
+	 * The nav button needs some icon; drawn at runtime (a gold "PB" on a dark
+	 * square, matching the website's own accent color) rather than shipping
+	 * a separate image asset for something this small.
+	 */
+	private static java.awt.image.BufferedImage buildNavIcon()
+	{
+		java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(24, 24, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.Graphics2D g = image.createGraphics();
+		g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setColor(new Color(0x1f, 0x19, 0x12));
+		g.fillRoundRect(0, 0, 24, 24, 6, 6);
+		g.setColor(new Color(0xFF, 0x98, 0x1F));
+		g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 10));
+		java.awt.FontMetrics metrics = g.getFontMetrics();
+		String text = "PB";
+		int x = (24 - metrics.stringWidth(text)) / 2;
+		int y = (24 - metrics.getHeight()) / 2 + metrics.getAscent();
+		g.drawString(text, x, y);
+		g.dispose();
+		return image;
+	}
+
+	/** Fetched once on startup - the side panel's Bosses tab needs the full boss key list to build its picker. */
+	private void refreshBossList()
+	{
+		executor.execute(() ->
+		{
+			List<String> bosses = syncClient.getBosses();
+			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.setBosses(bosses));
+		});
 	}
 
 	/**
@@ -269,6 +323,7 @@ public class PbTrackerPlugin extends Plugin
 	protected void shutDown()
 	{
 		chatCommandManager.unregisterCommand(PBR_COMMAND_STRING);
+		clientToolbar.removeNavigation(navButton);
 	}
 
 	/**
@@ -293,7 +348,56 @@ public class PbTrackerPlugin extends Plugin
 				// give the client a few seconds to settle before bulk syncing
 				executor.schedule(this::syncAll, 5, TimeUnit.SECONDS);
 			}
+
+			if (sidePanel != null)
+			{
+				// Same reasoning as the bulk-sync delay above - the local
+				// player isn't populated yet at the instant this fires.
+				// sidePanel's own Swing components must only be touched on
+				// the EDT, which the ScheduledExecutorService isn't.
+				executor.schedule(() -> javax.swing.SwingUtilities.invokeLater(() ->
+				{
+					if (client.getLocalPlayer() != null)
+					{
+						sidePanel.onLocalPlayerChanged(client.getLocalPlayer().getName());
+					}
+				}), 5, TimeUnit.SECONDS);
+			}
 		}
+		else if (event.getGameState() == GameState.LOGIN_SCREEN && sidePanel != null)
+		{
+			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
+		}
+	}
+
+	/**
+	 * Adds a "Lookup PB Tracker" right-click option on other players,
+	 * matching the in-game hiscore lookup convention. Anchored on "Follow"
+	 * since that option is present on every player's menu (including in the
+	 * players-nearby list), so this only adds the entry once per menu
+	 * rather than once per existing option.
+	 */
+	@Subscribe
+	public void onMenuEntryAdded(MenuEntryAdded event)
+	{
+		if (!config.rightClickLookup() || sidePanel == null || !"Follow".equals(event.getOption()))
+		{
+			return;
+		}
+
+		MenuEntry entry = event.getMenuEntry();
+		Player player = entry.getPlayer();
+		if (player == null || player.getName() == null)
+		{
+			return;
+		}
+
+		String playerName = player.getName();
+		client.getMenu().createMenuEntry(-1)
+			.setOption("Lookup PB Tracker")
+			.setTarget(entry.getTarget())
+			.setType(MenuAction.RUNELITE)
+			.onClick(e -> sidePanel.lookupPlayer(playerName));
 	}
 
 	@Subscribe
@@ -485,10 +589,19 @@ public class PbTrackerPlugin extends Plugin
 				capitalizeNext = true;
 				result.append(c);
 			}
-			else
+			else if (Character.isLetterOrDigit(c))
 			{
 				result.append(capitalizeNext ? Character.toUpperCase(c) : c);
 				capitalizeNext = false;
+			}
+			else
+			{
+				// Punctuation like "(" or "'" - matches the website's
+				// titleCase() (a regex that finds each "word start"): it
+				// doesn't consume a pending capitalization, so "(former)"
+				// correctly becomes "(Former)" instead of "(former)" with
+				// the capitalization wasted on "(" itself.
+				result.append(c);
 			}
 		}
 		return result.toString();

@@ -109,6 +109,68 @@ class SyncClient
 		}
 	}
 
+	/** Blocking GET of every tracked boss key - for the side panel's boss picker. Returns an empty list on any failure. */
+	List<String> getBosses()
+	{
+		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		Request request = new Request.Builder().url(base + "/api/bosses").get().build();
+
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (!response.isSuccessful())
+			{
+				return java.util.Collections.emptyList();
+			}
+			ResponseBody responseBody = response.body();
+			String body = responseBody == null ? null : responseBody.string();
+			if (body == null)
+			{
+				return java.util.Collections.emptyList();
+			}
+			String[] bosses = gson.fromJson(body, String[].class);
+			return bosses == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(bosses);
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return java.util.Collections.emptyList();
+		}
+	}
+
+	/** Blocking GET of a boss's leaderboard - for the side panel's Bosses tab. Returns null on failure. */
+	List<LeaderboardRow> getLeaderboard(String boss, int limit)
+	{
+		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		String encodedBoss = URLEncoder.encode(boss, StandardCharsets.UTF_8).replace("+", "%20");
+		Request request = new Request.Builder().url(base + "/api/leaderboard/" + encodedBoss + "?limit=" + limit).get().build();
+
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (!response.isSuccessful())
+			{
+				return null;
+			}
+			ResponseBody responseBody = response.body();
+			String body = responseBody == null ? null : responseBody.string();
+			if (body == null)
+			{
+				return null;
+			}
+			LeaderboardRow[] rows = gson.fromJson(body, LeaderboardRow[].class);
+			return rows == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(rows);
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	static class LeaderboardRow
+	{
+		String displayName;
+		double timeSeconds;
+		String updatedAt;
+	}
+
 	private static class SyncPayload
 	{
 		final String accountHash;
