@@ -7,6 +7,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class PbTrackerPluginUnitTest
@@ -136,5 +137,53 @@ public class PbTrackerPluginUnitTest
 		assertEquals(
 			"https://osrs-pb-tracker-frontend.vercel.app/player/Blitzen%20Jones",
 			PbTrackerPlugin.buildProfileUrl("Blitzen Jones"));
+	}
+
+	@Test
+	public void extractsOwnerNameFromTheLocalPlayersOwnCountersPage()
+	{
+		// Real captured value from a live gradle run session, own account's
+		// Counters page.
+		assertEquals("Blitzen", PbTrackerPlugin.extractAdventureLogOwnerName("Blitzen"));
+	}
+
+	@Test
+	public void extractsOwnerNameFromAFriendsPohCountersPage()
+	{
+		// Real captured value visiting a friend's POH and reading their
+		// Adventure Log - confirms the widget shows the HOUSE OWNER's name,
+		// not the visiting player's.
+		assertEquals("Dad", PbTrackerPlugin.extractAdventureLogOwnerName("Dad"));
+	}
+
+	@Test
+	public void extractsOwnerNameFromTheMainMenuPageTitleForm()
+	{
+		// Not confirmed live (only the Counters sub-page was tested), kept
+		// as defensive handling in case this code path ever sees the
+		// Adventure Log's main menu page title instead.
+		assertEquals("Blitzen", PbTrackerPlugin.extractAdventureLogOwnerName("The Exploits of Blitzen"));
+	}
+
+	@Test
+	public void ownerNameExtractionReturnsNullForBlankOrMissingTitle()
+	{
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName(null));
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName(""));
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName("   "));
+	}
+
+	@Test
+	public void ownerNameExtractionReturnsNullForGenericAdventureLogPageLabels()
+	{
+		// If the TITLE widget ever reads one of the Adventure Log's own
+		// generic page labels instead of an account name, that must not be
+		// treated as evidence of a different owner - this is exactly what
+		// was flagged in PR review as the risk of matching any nonempty
+		// string as a name.
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName("Counters"));
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName("counters"));
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName("Adventure Log"));
+		assertNull(PbTrackerPlugin.extractAdventureLogOwnerName("Collection log"));
 	}
 }

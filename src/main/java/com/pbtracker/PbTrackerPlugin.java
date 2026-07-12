@@ -30,8 +30,10 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +97,25 @@ public class PbTrackerPlugin extends Plugin
 	private static final Pattern RECORD_PATTERN = Pattern.compile(
 		"^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$"
 	);
+
+	// Matches the Journalscroll TITLE widget's text (distinct from the
+	// TEXTLAYER widget the Counters records themselves live in). Confirmed
+	// live: on the Counters sub-page specifically it's a bare account name
+	// ("Blitzen", or a friend's "Dad" when reading their POH copy) - the
+	// "The Exploits of <name>" form is what the Adventure Log's main MENU
+	// page shows instead, kept here defensively in case that page is ever
+	// reached through this same code path.
+	private static final Pattern JOURNAL_TITLE_PATTERN = Pattern.compile("^(?:The Exploits of )?(?<name>.+)$");
+
+	// Generic page labels the Adventure Log itself uses (its own menu entries
+	// plus the Counters page's own un-personalized heading) - if the TITLE
+	// widget ever reads one of these instead of an actual account name, that
+	// is NOT evidence the log belongs to someone else, so this must not
+	// block syncing over it. Addresses the concern that any unrecognized
+	// nonempty title would otherwise be treated as a mismatched owner.
+	private static final Set<String> GENERIC_JOURNAL_TITLES = new HashSet<>(Arrays.asList(
+		"counters", "adventure log", "slayer log", "boss log", "champions log", "collection log"
+	));
 
 	// A few activities are stored under a different internal name in
 	// RuneLite's raw "personalbest" config than the heading the Adventure Log
@@ -363,6 +384,24 @@ public class PbTrackerPlugin extends Plugin
 		}
 		journalScrollLoaded = false;
 
+		Widget titleWidget = client.getWidget(InterfaceID.Journalscroll.TITLE);
+		String ownerName = titleWidget == null ? null : extractAdventureLogOwnerName(Text.removeTags(titleWidget.getText()));
+		String localPlayerName = client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName();
+
+		if (ownerName != null && localPlayerName != null && !ownerName.equalsIgnoreCase(localPlayerName))
+		{
+			// Guests can right-click and read another player's Adventure Log
+			// in their POH - the widget then shows the HOUSE OWNER's data,
+			// not the guest's. Confirmed live: the local player's own
+			// Counters page TITLE widget reads the bare account name (e.g.
+			// "Blitzen"), and a friend's POH Counters page reads THEIR bare
+			// name instead (e.g. "Dad") - with the parser below still
+			// happily producing PBs for it. Without this check those would
+			// get synced under the local player's account instead.
+			log.debug("Adventure Log belongs to {}, not the local player {} - skipping sync", ownerName, localPlayerName);
+			return;
+		}
+
 		Widget parent = client.getWidget(InterfaceID.Journalscroll.TEXTLAYER);
 		if (parent == null)
 		{
@@ -453,6 +492,38 @@ public class PbTrackerPlugin extends Plugin
 	private static boolean isBareValue(String line)
 	{
 		return line.equals("-") || line.matches("[0-9:]+(?:\\.[0-9]+)?");
+	}
+
+	/**
+	 * Extracts the account name from the Journalscroll TITLE widget's text -
+	 * "The Exploits of Blitzen" or a bare "Blitzen" both yield "Blitzen".
+	 * Returns null for blank/empty input, or for a known generic Adventure
+	 * Log page label (GENERIC_JOURNAL_TITLES) that isn't actually an account
+	 * name - both cases mean "couldn't determine an owner", which callers
+	 * treat as "don't block the sync" rather than a mismatch.
+	 */
+	static String extractAdventureLogOwnerName(String titleText)
+	{
+		if (titleText == null)
+		{
+			return null;
+		}
+		String trimmed = titleText.trim();
+		if (trimmed.isEmpty())
+		{
+			return null;
+		}
+		Matcher matcher = JOURNAL_TITLE_PATTERN.matcher(trimmed);
+		if (!matcher.matches())
+		{
+			return null;
+		}
+		String name = matcher.group("name").trim();
+		if (GENERIC_JOURNAL_TITLES.contains(name.toLowerCase()))
+		{
+			return null;
+		}
+		return name;
 	}
 
 	/**
