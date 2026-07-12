@@ -24,6 +24,22 @@ final class BossIcons
 	private static final Map<String, ImageIcon> CACHE = new ConcurrentHashMap<>();
 	private static final ImageIcon MISSING = new ImageIcon();
 
+	/**
+	 * Slugs with no art of their own that should fall back to a close
+	 * relative's icon instead of rendering blank: the "awakened" DT2 bosses
+	 * share their base form's icon, Demonic Brutus shares Brutus's, and the
+	 * Tzhaar-Ket-Rak challenges (no dedicated Wiki art) borrow Jad's.
+	 */
+	private static final Map<String, String> ALIASES = Map.of(
+		"duke_sucellus_(awakened)", "duke_sucellus",
+		"leviathan_(awakened)", "leviathan",
+		"vardorvis_(awakened)", "vardorvis",
+		"whisperer_(awakened)", "whisperer",
+		"demonic_brutus", "brutus",
+		"tzhaar_ket_raks_fifth_challenge", "tztok_jad",
+		"tzhaar_ket_raks_sixth_challenge", "tztok_jad"
+	);
+
 	/** Returns null if there's no art for this boss - callers should render without an icon in that case. */
 	static ImageIcon get(String bossKey)
 	{
@@ -32,6 +48,7 @@ final class BossIcons
 		{
 			return null;
 		}
+		slug = ALIASES.getOrDefault(slug, slug);
 		ImageIcon cached = CACHE.get(slug);
 		if (cached != null)
 		{
@@ -63,6 +80,13 @@ final class BossIcons
 		if (dash >= 0)
 		{
 			base = base.substring(0, dash);
+		}
+		// "the nightmare"/"the gauntlet"/"the corrupted gauntlet"/"the
+		// hueycoatl" are stored with a "the " prefix the bundled art doesn't
+		// have - mirrors BossGroups.normalize()'s existing convention.
+		if (base.startsWith("the "))
+		{
+			base = base.substring(4);
 		}
 		return base.replace("'", "").replace(" ", "_").replace("-", "_");
 	}
