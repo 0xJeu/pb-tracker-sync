@@ -11,25 +11,19 @@ import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
  * Renders a player's synced PBs as a vertical list of rows, grouped by raid
- * (collapsed to one summary row, expandable to show every team-size/mode
- * variant - matching the website's boss picker) with everything else shown
- * flat - reused by both the "My PBs" and "Player Search" tabs, since they
- * display the same kind of data.
+ * (heading + every recorded size/mode variant shown beneath it, matching the
+ * website's boss picker) with everything else shown flat - reused by both
+ * the "My PBs" and "Player Search" tabs, since they display the same kind of
+ * data.
  */
 class PbListPanel extends JPanel
 {
 	private final JPanel rowsContainer = new JPanel();
-	private final Set<String> expandedHeadings = new HashSet<>();
-
-	private SyncClient.PlayerLookupResponse lastPlayer;
-	private BiConsumer<String, String> lastOnBossClick;
 
 	PbListPanel()
 	{
@@ -43,7 +37,6 @@ class PbListPanel extends JPanel
 
 	void showMessage(String text)
 	{
-		lastPlayer = null;
 		rowsContainer.removeAll();
 		JLabel label = new JLabel("<html><center>" + text + "</center></html>");
 		label.setForeground(PbTrackerTheme.TEXT_DIM);
@@ -61,8 +54,6 @@ class PbListPanel extends JPanel
 	 */
 	void showPlayer(SyncClient.PlayerLookupResponse player, BiConsumer<String, String> onBossClick)
 	{
-		lastPlayer = player;
-		lastOnBossClick = onBossClick;
 		rowsContainer.removeAll();
 
 		if (player.pbs == null || player.pbs.isEmpty())
@@ -80,7 +71,7 @@ class PbListPanel extends JPanel
 		BossGroups.GroupedPlayerPbs grouped = BossGroups.groupPlayerRaidPbs(pbs);
 		int rowCount = grouped.groups.size() + grouped.flat.size();
 
-		addHeaderRow(player.displayName + " - " + rowCount + " boss(es), " + player.pbs.size() + " time(s) tracked");
+		addHeaderRow(player.displayName + " - " + rowCount + " bosses, " + player.pbs.size() + " PBs");
 
 		for (BossGroups.PlayerRaidGroup group : grouped.groups)
 		{
@@ -98,65 +89,45 @@ class PbListPanel extends JPanel
 		repaint();
 	}
 
-	private void rerender()
-	{
-		if (lastPlayer != null)
-		{
-			showPlayer(lastPlayer, lastOnBossClick);
-		}
-	}
-
 	private void addHeaderRow(String text)
 	{
-		JLabel label = new JLabel(text);
+		// A JLabel never wraps and gets clipped at the panel edge once the
+		// scrollbar is disabled - wrap it like every other line of text here.
+		JTextArea label = new JTextArea(text);
+		label.setEditable(false);
+		label.setFocusable(false);
+		label.setLineWrap(true);
+		label.setWrapStyleWord(true);
+		label.setOpaque(false);
 		label.setForeground(PbTrackerTheme.GOLD);
 		label.setFont(FontManager.getRunescapeBoldFont());
 		label.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		rowsContainer.add(label);
 	}
 
+	/**
+	 * Every recorded size/mode variant is always shown as its own row under
+	 * the heading - a hidden expand/collapse chevron here was too easy to
+	 * miss (players kept reporting "where are my other team sizes?" even
+	 * though the data was there), so there's no toggle state to discover.
+	 */
 	private void addRaidGroupRow(BossGroups.PlayerRaidGroup group, String displayName, BiConsumer<String, String> onBossClick)
 	{
-		boolean hasMultipleVariants = group.variants.size() > 1;
-		boolean expanded = hasMultipleVariants && expandedHeadings.contains(group.heading);
-
-		RowParts row = buildRowContainer(hasMultipleVariants, expanded);
+		RowParts row = buildRowContainer();
 		String timeText = PbTrackerPlugin.formatTime(group.summary.timeSeconds) + "  (" + group.summary.label + ")";
 		row.content.add(buildHeadingLabel(group.heading));
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(timeText, group.summary.rank));
 		makeClickable(row.content, () -> onBossClick.accept(group.summary.key, displayName));
-		if (row.chevron != null)
-		{
-			row.chevron.addMouseListener(new java.awt.event.MouseAdapter()
-			{
-				@Override
-				public void mouseClicked(java.awt.event.MouseEvent e)
-				{
-					if (expandedHeadings.contains(group.heading))
-					{
-						expandedHeadings.remove(group.heading);
-					}
-					else
-					{
-						expandedHeadings.add(group.heading);
-					}
-					rerender();
-				}
-			});
-		}
 		rowsContainer.add(row.outer);
 
-		if (expanded)
+		for (BossGroups.PlayerRaidVariant variant : group.variants)
 		{
-			for (BossGroups.PlayerRaidVariant variant : group.variants)
-			{
-				addVariantSubRow(variant, displayName, onBossClick);
-			}
+			addVariantSubRow(variant, displayName, onBossClick);
 		}
 	}
 
-	/** An indented, smaller row for one team-size/mode variant within an expanded raid group. */
+	/** An indented, smaller row for one team-size/mode variant beneath its raid+mode heading. */
 	private void addVariantSubRow(BossGroups.PlayerRaidVariant variant, String displayName, BiConsumer<String, String> onBossClick)
 	{
 		JPanel row = new JPanel(new BorderLayout());
@@ -167,14 +138,18 @@ class PbListPanel extends JPanel
 		));
 		row.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
-		JLabel label = new JLabel(variant.label);
-		label.setForeground(PbTrackerTheme.TEXT_DIM);
+		// One wrapped line instead of a WEST/EAST label pair - see
+		// buildDetailLine()'s comment for why side-by-side labels clip once
+		// the horizontal scrollbar is disabled.
+		JTextArea line = new JTextArea(variant.label + "   " + PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank);
+		line.setEditable(false);
+		line.setFocusable(false);
+		line.setLineWrap(true);
+		line.setWrapStyleWord(true);
+		line.setOpaque(false);
+		line.setForeground(PbTrackerTheme.TEXT_DIM);
 
-		JLabel time = new JLabel(PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank);
-		time.setForeground(PbTrackerTheme.GOLD_LIGHT);
-
-		row.add(label, BorderLayout.WEST);
-		row.add(time, BorderLayout.EAST);
+		row.add(line, BorderLayout.CENTER);
 		row.addMouseListener(new java.awt.event.MouseAdapter()
 		{
 			@Override
@@ -188,7 +163,7 @@ class PbListPanel extends JPanel
 
 	private void addFlatRow(BossGroups.PlayerPb pb, String displayName, BiConsumer<String, String> onBossClick)
 	{
-		RowParts row = buildRowContainer(false, false);
+		RowParts row = buildRowContainer();
 		row.content.add(buildHeadingLabel(PbTrackerPlugin.titleCase(pb.boss)));
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(PbTrackerPlugin.formatTime(pb.timeSeconds), pb.rank));
@@ -218,56 +193,47 @@ class PbListPanel extends JPanel
 		return heading;
 	}
 
-	/** Time (gold) on the left, rank (dim) on the right - one compact line instead of two. */
-	private JPanel buildDetailLine(String timeText, int rank)
+	/**
+	 * Time + rank as one wrapped line of text, rather than a BorderLayout
+	 * WEST/EAST pair - side-by-side labels each claim their full preferred
+	 * width, and once the panel's horizontal scrollbar is disabled, anything
+	 * past the visible edge is silently clipped instead of scrollable.
+	 * Wrapping avoids that entirely.
+	 */
+	private JTextArea buildDetailLine(String timeText, int rank)
 	{
-		JPanel line = new JPanel(new BorderLayout());
-		line.setBackground(PbTrackerTheme.PANEL);
+		JTextArea line = new JTextArea(timeText + "   #" + rank);
+		line.setEditable(false);
+		line.setFocusable(false);
+		line.setLineWrap(true);
+		line.setWrapStyleWord(true);
+		line.setOpaque(false);
+		line.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		line.setBorder(null);
 		line.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
-
-		JLabel time = new JLabel(timeText);
-		time.setForeground(PbTrackerTheme.GOLD_LIGHT);
-
-		JLabel rankLabel = new JLabel("Rank #" + rank);
-		rankLabel.setForeground(PbTrackerTheme.TEXT_DIM);
-
-		line.add(time, BorderLayout.WEST);
-		line.add(rankLabel, BorderLayout.EAST);
-		// Measured after both labels are added, unlike the bug this whole
-		// row layout is fixing - see buildRowContainer()'s comment.
-		line.setMaximumSize(new Dimension(Integer.MAX_VALUE, line.getPreferredSize().height));
 		return line;
 	}
 
-	/**
-	 * outer = the whole row (border, background); content = where
-	 * headings/detail lines go and where the "go to leaderboard" click
-	 * listener attaches; chevron = the separate expand/collapse toggle
-	 * (null when there's nothing to expand), so clicking the row body and
-	 * clicking the chevron do two different things.
-	 */
+	/** outer = the whole row (border, background); content = where headings/detail lines go and where the "go to leaderboard" click listener attaches. */
 	private static final class RowParts
 	{
 		final JPanel outer;
 		final JPanel content;
-		final JLabel chevron;
 
-		RowParts(JPanel outer, JPanel content, JLabel chevron)
+		RowParts(JPanel outer, JPanel content)
 		{
 			this.outer = outer;
 			this.content = content;
-			this.chevron = chevron;
 		}
 	}
 
-	private RowParts buildRowContainer(boolean expandable, boolean expanded)
+	private RowParts buildRowContainer()
 	{
 		JPanel content = new JPanel();
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setBackground(PbTrackerTheme.PANEL);
 		content.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
-		JLabel chevron = null;
 		JPanel outer = new JPanel(new BorderLayout());
 		outer.setBackground(PbTrackerTheme.PANEL);
 		outer.setBorder(BorderFactory.createCompoundBorder(
@@ -275,19 +241,6 @@ class PbListPanel extends JPanel
 			BorderFactory.createEmptyBorder(8, 10, 8, 10)
 		));
 		outer.add(content, BorderLayout.CENTER);
-
-		if (expandable)
-		{
-			// Plain ASCII rather than a Unicode arrow - RuneLite's bitmap
-			// OSRS font doesn't have a glyph for "›" and silently falls
-			// back to a "tofu" box character instead.
-			chevron = new JLabel(expanded ? "v" : ">");
-			chevron.setForeground(PbTrackerTheme.TEXT_DIM);
-			chevron.setFont(FontManager.getRunescapeBoldFont());
-			chevron.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
-			chevron.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-			outer.add(chevron, BorderLayout.EAST);
-		}
 
 		outer.setAlignmentX(0);
 		// Only constrain width (let the row stretch to fill rowsContainer),
@@ -297,7 +250,7 @@ class PbListPanel extends JPanel
 		// three labels (heading/time/rank) to render stacked on top of each
 		// other instead of stacked vertically.
 		outer.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-		return new RowParts(outer, content, chevron);
+		return new RowParts(outer, content);
 	}
 
 	private void makeClickable(JPanel row, Runnable onClick)
