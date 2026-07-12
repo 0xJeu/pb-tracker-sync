@@ -4,11 +4,15 @@ import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.MessageNode;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.chat.ChatCommandManager;
+import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -21,6 +25,7 @@ import okhttp3.Callback;
 import okhttp3.Response;
 
 import javax.inject.Inject;
+import java.awt.Color;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
@@ -30,6 +35,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -116,6 +122,85 @@ public class PbTrackerPlugin extends Plugin
 		KNOWN_DUPLICATE_RAW_KEYS.put("nightmare", "The Nightmare");
 	}
 
+	private static final String PBR_COMMAND_STRING = "!pbr";
+
+	// Explicit colors for !pbr's chat output rather than ChatColorType.NORMAL/
+	// HIGHLIGHT - those defer to the player's own configured chat colors,
+	// which on some setups render nearly identically (e.g. both a similar
+	// blue), making the response hard to read at a glance. These give three
+	// clearly distinct colors regardless of client theme - white for labels,
+	// the PB Tracker site's own gold for the time, green for rank.
+	private static final Color PBR_LABEL_COLOR = new Color(255, 255, 255);
+	private static final Color PBR_TIME_COLOR = new Color(255, 152, 31);
+	private static final Color PBR_RANK_COLOR = new Color(0, 200, 83);
+	private static final Color PBR_ERROR_COLOR = new Color(255, 255, 255);
+
+	// Matches the part of a synced boss key after the raid's bare prefix has
+	// been stripped, e.g. for "theatre of blood - hard - fastest overall (4
+	// player hard mode)" this matches against " - hard - fastest overall (4
+	// player hard mode)", capturing mode="hard" and paren="4 player hard
+	// mode". The mode group is optional since Normal-mode entries skip
+	// straight to " - fastest overall (...)" with no mode segment at all.
+	// Deliberately only matches "fastest overall" (not "room"/"wave") -
+	// that's the single completion time a player means by "record" when
+	// they ask for a specific team size.
+	private static final Pattern OVERALL_LABEL_PATTERN = Pattern.compile(
+		"^ - (?:(?<mode>.+?) - )?fastest overall \\((?<paren>.+)\\)$"
+	);
+
+	// Common shorthand -> the exact lowercase boss key the backend stores
+	// (i.e. what buildKey()/canonicalBossKey() above actually produce, once
+	// lowercased server-side). Anything not listed here just falls through
+	// to the raw, lowercased argument as typed, so "!pbr zulrah" or "!pbr
+	// vorkath" work without needing an entry - this map only exists for
+	// content whose stored key doesn't match what a player would naturally
+	// type (raid abbreviations, "the X" bosses, etc).
+	private static final Map<String, String> BOSS_ALIASES = new HashMap<>();
+	static
+	{
+		BOSS_ALIASES.put("tob", "theatre of blood");
+		BOSS_ALIASES.put("cox", "chambers of xeric");
+		BOSS_ALIASES.put("toa", "tombs of amascut");
+		BOSS_ALIASES.put("jad", "tzhaar fight cave");
+		BOSS_ALIASES.put("fc", "tzhaar fight cave");
+		BOSS_ALIASES.put("fightcave", "tzhaar fight cave");
+		BOSS_ALIASES.put("fightcaves", "tzhaar fight cave");
+		BOSS_ALIASES.put("fight caves", "tzhaar fight cave");
+		BOSS_ALIASES.put("zuk", "inferno");
+		BOSS_ALIASES.put("colo", "fortis colosseum");
+		BOSS_ALIASES.put("colosseum", "fortis colosseum");
+		BOSS_ALIASES.put("gaunt", "the gauntlet");
+		BOSS_ALIASES.put("gauntlet", "the gauntlet");
+		BOSS_ALIASES.put("cgaunt", "the corrupted gauntlet");
+		BOSS_ALIASES.put("cg", "the corrupted gauntlet");
+		BOSS_ALIASES.put("corrupted gauntlet", "the corrupted gauntlet");
+		BOSS_ALIASES.put("nm", "the nightmare");
+		BOSS_ALIASES.put("nightmare", "the nightmare");
+		BOSS_ALIASES.put("pnm", "phosani's nightmare");
+		BOSS_ALIASES.put("phosani", "phosani's nightmare");
+		BOSS_ALIASES.put("phosanis", "phosani's nightmare");
+		BOSS_ALIASES.put("huey", "the hueycoatl");
+		BOSS_ALIASES.put("hueycoatl", "the hueycoatl");
+		BOSS_ALIASES.put("levi", "leviathan");
+		BOSS_ALIASES.put("whisp", "whisperer");
+		BOSS_ALIASES.put("wisp", "whisperer");
+		BOSS_ALIASES.put("duke", "duke sucellus");
+		BOSS_ALIASES.put("vard", "vardorvis");
+	}
+
+	// Shorthand that names a specific raid *mode*, not just the raid itself
+	// (e.g. "hmt" = Hard Mode Theatre of Blood). Each entry is {raid prefix,
+	// required mode} - unlike BOSS_ALIASES, resolving one of these means the
+	// match must come from that exact mode, not just prefer it when
+	// ambiguous. Add more here as needed (e.g. a Challenge Mode CoX or
+	// Entry Mode ToB shorthand) - same shape.
+	private static final Map<String, String[]> MODE_SPECIFIC_ALIASES = new HashMap<>();
+	static
+	{
+		MODE_SPECIFIC_ALIASES.put("hmt", new String[] { "theatre of blood", "hard" });
+		MODE_SPECIFIC_ALIASES.put("cm", new String[] { "chambers of xeric", "challenge mode" });
+	}
+
 	@Inject
 	private Client client;
 
@@ -127,6 +212,9 @@ public class PbTrackerPlugin extends Plugin
 
 	@Inject
 	private SyncClient syncClient;
+
+	@Inject
+	private ChatCommandManager chatCommandManager;
 
 	@Inject
 	private ScheduledExecutorService executor;
@@ -151,6 +239,7 @@ public class PbTrackerPlugin extends Plugin
 	protected void startUp()
 	{
 		installSecret = getOrCreateInstallSecret();
+		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 	}
 
 	/**
@@ -179,6 +268,7 @@ public class PbTrackerPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		chatCommandManager.unregisterCommand(PBR_COMMAND_STRING);
 	}
 
 	/**
@@ -341,6 +431,314 @@ public class PbTrackerPlugin extends Plugin
 			default:
 				return key;
 		}
+	}
+
+	/**
+	 * Resolves what a player types after "!pbr" (e.g. "tob", "ToB", "Zulrah")
+	 * to the exact lowercase boss key the backend stores it under. Falls
+	 * back to the trimmed, lowercased input unchanged when there's no
+	 * shorthand entry for it, so any boss's real name always works even if
+	 * it's not in BOSS_ALIASES.
+	 */
+	static String resolveBossAlias(String input)
+	{
+		String normalized = input.trim().toLowerCase();
+		return BOSS_ALIASES.getOrDefault(normalized, normalized);
+	}
+
+	/**
+	 * Same formatting as the website's formatTime() (frontend/src/lib/format.ts)
+	 * so a time read out in chat matches what's shown on the leaderboard.
+	 */
+	static String formatTime(double totalSeconds)
+	{
+		long h = (long) (totalSeconds / 3600);
+		long m = (long) ((totalSeconds % 3600) / 60);
+		double s = totalSeconds % 60;
+		boolean hasFraction = Math.abs(s - Math.round(s)) > 0.001;
+		String secStr = hasFraction
+			? String.format("%05.2f", s)
+			: String.format("%02d", Math.round(s));
+
+		if (h > 0)
+		{
+			return h + ":" + String.format("%02d", m) + ":" + secStr;
+		}
+		return m + ":" + secStr;
+	}
+
+	/**
+	 * Same as the website's titleCase() (frontend/src/lib/format.ts) - used
+	 * so !pbr's response names the exact record it's showing (e.g. "Theatre
+	 * Of Blood - Hard - Fastest Overall (4 Player Hard Mode)") instead of a
+	 * generic "Personal best" with no label.
+	 */
+	static String titleCase(String str)
+	{
+		StringBuilder result = new StringBuilder(str.length());
+		boolean capitalizeNext = true;
+		for (int i = 0; i < str.length(); i++)
+		{
+			char c = str.charAt(i);
+			if (Character.isWhitespace(c))
+			{
+				capitalizeNext = true;
+				result.append(c);
+			}
+			else
+			{
+				result.append(capitalizeNext ? Character.toUpperCase(c) : c);
+				capitalizeNext = false;
+			}
+		}
+		return result.toString();
+	}
+
+	// Explicit mode keyword -> the exact mode text OVERALL_LABEL_PATTERN
+	// captures for it, for the "<boss> <mode> [size]" form (e.g. "tob entry
+	// 2", "cox challenge 3"). Separate from MODE_SPECIFIC_ALIASES, which is
+	// for single-word shortcuts naming both the raid and mode at once
+	// ("hmt", "cm") - this is for spelling the mode out after the boss.
+	private static final Map<String, String> MODE_KEYWORDS = new HashMap<>();
+	static
+	{
+		MODE_KEYWORDS.put("entry", "entry");
+		MODE_KEYWORDS.put("hard", "hard");
+		MODE_KEYWORDS.put("expert", "expert");
+		MODE_KEYWORDS.put("challenge", "challenge mode");
+	}
+
+	/**
+	 * Splits a !pbr argument into the boss part, an optional trailing
+	 * team-size token (a plain number, or "solo"), and an optional mode
+	 * keyword (entry/hard/expert/challenge) that comes right before the
+	 * size, if any - e.g. "tob entry 2" -> ("tob", "2", "entry"), "tob 4" ->
+	 * ("tob", "4", null), "fight caves" -> ("fight caves", null, null). Only
+	 * the trailing tokens are ever consumed this way, so multi-word boss
+	 * names/aliases aren't mistaken for a size or mode.
+	 */
+	static String[] splitBossSizeAndMode(String rawArgument)
+	{
+		String[] tokens = rawArgument.trim().split("\\s+");
+		int end = tokens.length;
+		String sizeArg = null;
+		String modeArg = null;
+
+		if (end > 1)
+		{
+			String last = tokens[end - 1].toLowerCase();
+			if (last.matches("\\d+") || last.equals("solo"))
+			{
+				sizeArg = last;
+				end--;
+			}
+		}
+
+		if (end > 1)
+		{
+			String mapped = MODE_KEYWORDS.get(tokens[end - 1].toLowerCase());
+			if (mapped != null)
+			{
+				modeArg = mapped;
+				end--;
+			}
+		}
+
+		String bossPart = String.join(" ", Arrays.copyOfRange(tokens, 0, end));
+		return new String[] { bossPart, sizeArg, modeArg };
+	}
+
+	private static boolean parenMatchesSize(String paren, String sizeArg)
+	{
+		if ("solo".equals(sizeArg))
+		{
+			return paren.equals("solo") || paren.startsWith("solo ");
+		}
+		return paren.equals(sizeArg + " player") || paren.startsWith(sizeArg + " player");
+	}
+
+	/**
+	 * Picks which synced PB entry !pbr should report for a resolved boss key,
+	 * optional team size, and optional mode.
+	 * <p>
+	 * requiredMode is null unless the player asked for a specific mode
+	 * (either via a MODE_SPECIFIC_ALIASES shorthand like "hmt"/"cm", or the
+	 * explicit "<boss> <mode> [size]" form like "tob entry 2"). Whichever it
+	 * is - null or a specific mode - only entries with THAT EXACT mode
+	 * segment are considered; there's no falling back to a different mode
+	 * than what was asked for. null specifically means "no mode segment at
+	 * all", i.e. true Normal mode - not "any mode", so "!pbr tob 1" (Normal
+	 * ToB has no solo/duo size) returns null rather than silently
+	 * substituting Entry mode's "1 player" record.
+	 * <p>
+	 * Only when NEITHER a size NOR a mode was given at all (a bare "!pbr
+	 * <boss>") does this fall back further: first to the single fastest
+	 * Normal-mode "Fastest Overall" entry across every team size, and only
+	 * if there's none of those either, to an exact match on the bare boss
+	 * key (non-raid bosses, or a raid the player only has a legacy/
+	 * unlabeled record for).
+	 */
+	static SyncClient.PbEntryDto findPbrMatch(List<SyncClient.PbEntryDto> pbs, String boss, String sizeArg, String requiredMode)
+	{
+		List<SyncClient.PbEntryDto> candidates = new ArrayList<>();
+
+		for (SyncClient.PbEntryDto pb : pbs)
+		{
+			if (pb.boss == null || !pb.boss.startsWith(boss))
+			{
+				continue;
+			}
+
+			Matcher matcher = OVERALL_LABEL_PATTERN.matcher(pb.boss.substring(boss.length()));
+			if (!matcher.matches())
+			{
+				continue;
+			}
+
+			if (sizeArg != null && !parenMatchesSize(matcher.group("paren"), sizeArg))
+			{
+				continue;
+			}
+
+			String mode = matcher.group("mode");
+			boolean modeMatches = requiredMode == null ? mode == null : mode != null && mode.equalsIgnoreCase(requiredMode);
+			if (!modeMatches)
+			{
+				continue;
+			}
+
+			candidates.add(pb);
+		}
+
+		SyncClient.PbEntryDto best = fastest(candidates);
+		if (best != null)
+		{
+			return best;
+		}
+
+		if (sizeArg != null || requiredMode != null)
+		{
+			return null;
+		}
+
+		for (SyncClient.PbEntryDto pb : pbs)
+		{
+			if (pb.boss != null && pb.boss.equalsIgnoreCase(boss))
+			{
+				return pb;
+			}
+		}
+		return null;
+	}
+
+	private static SyncClient.PbEntryDto fastest(List<SyncClient.PbEntryDto> candidates)
+	{
+		if (candidates.isEmpty())
+		{
+			return null;
+		}
+		SyncClient.PbEntryDto fastest = candidates.get(0);
+		for (SyncClient.PbEntryDto pb : candidates)
+		{
+			if (pb.timeSeconds < fastest.timeSeconds)
+			{
+				fastest = pb;
+			}
+		}
+		return fastest;
+	}
+
+	/**
+	 * Chat command handler for "!pbr <boss>[ <size>]" - looks up the local
+	 * player's synced personal best and leaderboard rank for that boss (and,
+	 * for raids, optionally a specific team size) from the PB tracker
+	 * backend and prints it in chat. Registered via registerCommandAsync,
+	 * which RuneLite already runs off the client thread, so the blocking
+	 * SyncClient.lookupPlayer() call below is safe here the same way
+	 * RuneLite's own built-in "!lvl" hiscore lookup does a blocking network
+	 * call directly in its handler.
+	 */
+	private void pbrLookup(ChatMessage chatMessage, String message)
+	{
+		if (!config.pbrCommand())
+		{
+			return;
+		}
+
+		if (message.length() <= PBR_COMMAND_STRING.length())
+		{
+			respondPbr(chatMessage, "Usage: !pbr <boss> [mode] [team size], e.g. !pbr tob, !pbr tob 4, !pbr tob entry 2, or !pbr hmt");
+			return;
+		}
+
+		String rawArgument = message.substring(PBR_COMMAND_STRING.length() + 1).trim();
+		if (rawArgument.isEmpty())
+		{
+			respondPbr(chatMessage, "Usage: !pbr <boss> [mode] [team size], e.g. !pbr tob, !pbr tob 4, !pbr tob entry 2, or !pbr hmt");
+			return;
+		}
+
+		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		{
+			respondPbr(chatMessage, "Not logged in yet.");
+			return;
+		}
+
+		String[] parsed = splitBossSizeAndMode(rawArgument);
+		String bossArg = parsed[0];
+		String sizeArg = parsed[1];
+		String parsedMode = parsed[2];
+
+		String[] modeAlias = MODE_SPECIFIC_ALIASES.get(bossArg.trim().toLowerCase());
+		String boss = modeAlias != null ? modeAlias[0] : resolveBossAlias(bossArg);
+		String requiredMode = modeAlias != null ? modeAlias[1] : parsedMode;
+
+		String playerName = client.getLocalPlayer().getName();
+
+		SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(playerName);
+		switch (result.kind)
+		{
+			case NOT_FOUND:
+				respondPbr(chatMessage, "No synced PB data found for " + playerName + " yet.");
+				return;
+			case AMBIGUOUS:
+				respondPbr(chatMessage, "Multiple synced accounts share this name - check the website directly.");
+				return;
+			case ERROR:
+				respondPbr(chatMessage, "PB Tracker lookup failed - try again later.");
+				return;
+			case FOUND:
+				break;
+		}
+
+		SyncClient.PbEntryDto match = findPbrMatch(result.player.pbs, boss, sizeArg, requiredMode);
+		if (match == null)
+		{
+			String label = sizeArg != null ? (titleCase(bossArg) + " (" + sizeArg + ")") : titleCase(bossArg);
+			respondPbr(chatMessage, "No personal best recorded for " + label + ".");
+			return;
+		}
+
+		String response = new ChatMessageBuilder()
+			.append(PBR_LABEL_COLOR, titleCase(match.boss) + " personal best: ")
+			.append(PBR_TIME_COLOR, formatTime(match.timeSeconds))
+			.append(PBR_LABEL_COLOR, "  Rank: ")
+			.append(PBR_RANK_COLOR, "#" + match.rank)
+			.build();
+
+		MessageNode messageNode = chatMessage.getMessageNode();
+		messageNode.setRuneLiteFormatMessage(response);
+		client.refreshChat();
+	}
+
+	private void respondPbr(ChatMessage chatMessage, String text)
+	{
+		String formatted = new ChatMessageBuilder()
+			.append(PBR_ERROR_COLOR, text)
+			.build();
+		MessageNode messageNode = chatMessage.getMessageNode();
+		messageNode.setRuneLiteFormatMessage(formatted);
+		client.refreshChat();
 	}
 
 	@Subscribe

@@ -6,13 +6,20 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 import javax.inject.Inject;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Thin wrapper around RuneLite's shared OkHttpClient that POSTs a player's
- * personal bests to the PB tracker backend.
+ * Thin wrapper around RuneLite's shared OkHttpClient that talks to the PB
+ * tracker backend: POSTs a player's personal bests, and (for the !pbr chat
+ * command) does a blocking GET lookup of a player's synced PBs.
  */
 class SyncClient
 {
@@ -51,6 +58,57 @@ class SyncClient
 		httpClient.newCall(request).enqueue(callback);
 	}
 
+	/**
+	 * Blocking GET of a player's synced PBs, for the !pbr chat command.
+	 * Safe to call directly from a registerCommandAsync handler - those
+	 * already run off the client thread, the same way RuneLite's own
+	 * built-in hiscore-lookup commands (e.g. !lvl) make a blocking network
+	 * call directly rather than needing their own executor/callback.
+	 */
+	PlayerLookupResult lookupPlayer(String displayName)
+	{
+		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		String encodedName = URLEncoder.encode(displayName, StandardCharsets.UTF_8).replace("+", "%20");
+		String url = base + "/api/players/" + encodedName;
+
+		Request request = new Request.Builder().url(url).get().build();
+
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (response.code() == 404)
+			{
+				return PlayerLookupResult.notFound();
+			}
+			if (!response.isSuccessful())
+			{
+				return PlayerLookupResult.error();
+			}
+
+			ResponseBody responseBody = response.body();
+			String body = responseBody == null ? null : responseBody.string();
+			if (body == null)
+			{
+				return PlayerLookupResult.error();
+			}
+
+			PlayerLookupResponse parsed = gson.fromJson(body, PlayerLookupResponse.class);
+			if (parsed == null)
+			{
+				return PlayerLookupResult.error();
+			}
+			if (Boolean.TRUE.equals(parsed.ambiguous))
+			{
+				return PlayerLookupResult.ambiguous();
+			}
+
+			return PlayerLookupResult.found(parsed);
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return PlayerLookupResult.error();
+		}
+	}
+
 	private static class SyncPayload
 	{
 		final String accountHash;
@@ -64,6 +122,73 @@ class SyncClient
 			this.displayName = displayName;
 			this.pbs = pbs;
 			this.installSecret = installSecret;
+		}
+	}
+
+	/**
+	 * Mirrors the backend's GET /api/players/:name response shape. `pbs` is
+	 * null/absent on an ambiguous match (the endpoint returns `matches`
+	 * instead, which the !pbr command has no use for and doesn't parse).
+	 */
+	static class PlayerLookupResponse
+	{
+		Integer id;
+		String displayName;
+		String updatedAt;
+		List<PbEntryDto> pbs;
+		Boolean ambiguous;
+	}
+
+	static class PbEntryDto
+	{
+		String boss;
+		double timeSeconds;
+		String updatedAt;
+		int rank;
+	}
+
+	enum LookupKind
+	{
+		FOUND,
+		NOT_FOUND,
+		AMBIGUOUS,
+		ERROR
+	}
+
+	/**
+	 * Small result type so callers (the !pbr command) can branch on exactly
+	 * why a lookup didn't produce PB data, instead of collapsing 404/
+	 * ambiguous/network-failure into a single null.
+	 */
+	static class PlayerLookupResult
+	{
+		final LookupKind kind;
+		final PlayerLookupResponse player;
+
+		private PlayerLookupResult(LookupKind kind, PlayerLookupResponse player)
+		{
+			this.kind = kind;
+			this.player = player;
+		}
+
+		static PlayerLookupResult found(PlayerLookupResponse player)
+		{
+			return new PlayerLookupResult(LookupKind.FOUND, player);
+		}
+
+		static PlayerLookupResult notFound()
+		{
+			return new PlayerLookupResult(LookupKind.NOT_FOUND, null);
+		}
+
+		static PlayerLookupResult ambiguous()
+		{
+			return new PlayerLookupResult(LookupKind.AMBIGUOUS, null);
+		}
+
+		static PlayerLookupResult error()
+		{
+			return new PlayerLookupResult(LookupKind.ERROR, null);
 		}
 	}
 }

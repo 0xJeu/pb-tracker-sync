@@ -88,4 +88,16 @@ public interface PbTrackerConfig extends Config
 	{
 		return false;
 	}
+
+	@ConfigItem(
+		keyName = "pbrCommand",
+		name = "Enable !pbr command",
+		description = "Type !pbr <boss> in chat (e.g. \"!pbr tob\") to see your personal best and leaderboard "
+			+ "rank for that boss, looked up from the PB tracker site.",
+		position = 7
+	)
+	default boolean pbrCommand()
+	{
+		return true;
+	}
 }
