@@ -271,7 +271,11 @@ class BossesTab extends JPanel
 		leaderboardRows.setLayout(new BoxLayout(leaderboardRows, BoxLayout.Y_AXIS));
 		leaderboardRows.setBackground(PbTrackerTheme.BG);
 
-		JPanel leaderboardContainer = new JPanel(new BorderLayout());
+		// Scrollable so the JViewport clamps this to the actual visible
+		// width instead of using its raw preferred size - see PbListPanel's
+		// class doc for why a plain JPanel here lets wrapped text force the
+		// whole panel wider instead of wrapping.
+		JPanel leaderboardContainer = new ScrollableWidthPanel(new BorderLayout());
 		leaderboardContainer.setBackground(PbTrackerTheme.BG);
 		leaderboardContainer.add(leaderboardTitle, BorderLayout.NORTH);
 		leaderboardContainer.add(leaderboardRows, BorderLayout.CENTER);
@@ -545,5 +549,50 @@ class BossesTab extends JPanel
 		drillDownPanel.revalidate();
 		drillDownPanel.repaint();
 		loadLeaderboard(bossKey, PbTrackerPlugin.titleCase(bossKey));
+	}
+
+	/**
+	 * A plain JPanel isn't Scrollable-aware, so its enclosing JViewport just
+	 * takes its raw preferred width verbatim - which, because of the wrapped
+	 * JTextArea leaderboard title, is misleadingly wide and forces the whole
+	 * panel wider instead of wrapping. Implementing Scrollable and tracking
+	 * viewport width fixes that.
+	 */
+	private static final class ScrollableWidthPanel extends JPanel implements javax.swing.Scrollable
+	{
+		ScrollableWidthPanel(java.awt.LayoutManager layout)
+		{
+			super(layout);
+		}
+
+		@Override
+		public Dimension getPreferredScrollableViewportSize()
+		{
+			return getPreferredSize();
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(java.awt.Rectangle visibleRect, int orientation, int direction)
+		{
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(java.awt.Rectangle visibleRect, int orientation, int direction)
+		{
+			return visibleRect.height;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth()
+		{
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight()
+		{
+			return false;
+		}
 	}
 }
