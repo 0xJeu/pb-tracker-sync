@@ -202,6 +202,8 @@ class BossesTab extends JPanel
 			JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 			PickerEntry entry = (PickerEntry) value;
 			label.setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 10));
+			label.setIcon(BossIcons.get(entry.key));
+			label.setIconTextGap(8);
 			if (entry.isRaidBase)
 			{
 				// Plain ASCII rather than a Unicode arrow - see the chevron
@@ -244,9 +246,11 @@ class BossesTab extends JPanel
 		repaint();
 	}
 
-	private void showSelectedBossBar(String label)
+	private void showSelectedBossBar(String label, String iconKey)
 	{
 		selectedBossBar.setText(label + "   (change)");
+		selectedBossBar.setIcon(BossIcons.get(iconKey));
+		selectedBossBar.setIconTextGap(8);
 		pickerSection.setVisible(false);
 		selectedBossBar.setVisible(true);
 		revalidate();
@@ -322,7 +326,7 @@ class BossesTab extends JPanel
 	private void onPickerSelection(PickerEntry entry)
 	{
 		drillDownPanel.removeAll();
-		showSelectedBossBar(entry.label);
+		showSelectedBossBar(entry.label, entry.key);
 
 		if (!entry.isRaidBase)
 		{
@@ -536,7 +540,7 @@ class BossesTab extends JPanel
 	void showBossHighlighted(String bossKey, String highlightPlayerName)
 	{
 		pendingHighlight = highlightPlayerName;
-		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey));
+		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey), bossKey);
 		drillDownPanel.removeAll();
 		drillDownPanel.revalidate();
 		drillDownPanel.repaint();
