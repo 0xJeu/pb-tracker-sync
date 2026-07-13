@@ -324,6 +324,21 @@ final class BossGroups
 		}
 	}
 
+	/** Every non-raid boss key in `bosses`, deduplicated - for enumerating "every boss that could show up" regardless of whether this player has PBs for it. */
+	static List<String> getFlatBossKeys(List<String> bosses)
+	{
+		List<String> flat = new ArrayList<>();
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		for (String b : bosses)
+		{
+			if (!isGroupedVariant(b) && seen.add(b.trim().toLowerCase()))
+			{
+				flat.add(b);
+			}
+		}
+		return flat;
+	}
+
 	/** One row per raid base (mode-independent) - for the top-level "pick a raid" list. */
 	static List<RaidBase> getRaidBases(List<String> bosses)
 	{

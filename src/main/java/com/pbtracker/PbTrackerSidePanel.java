@@ -71,6 +71,8 @@ class PbTrackerSidePanel extends PluginPanel
 	void setBosses(java.util.List<String> bosses)
 	{
 		bossesTab.setBosses(bosses);
+		myPbsTab.setAllBosses(bosses);
+		searchTab.setAllBosses(bosses);
 	}
 
 	/** Called by the right-click "Search PB" menu option. */

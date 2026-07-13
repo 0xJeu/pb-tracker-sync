@@ -37,6 +37,12 @@ class MyPbsTab extends JPanel
 		listPanel.showMessage("Log in to see your PBs.");
 	}
 
+	/** Every boss key this plugin knows about system-wide - forwarded to the list panel so untracked bosses can show a dash instead of being omitted. */
+	void setAllBosses(java.util.List<String> bosses)
+	{
+		listPanel.setAllBosses(bosses);
+	}
+
 	/** Called on login (and whenever the panel is (re)opened) with the local player's name. */
 	void load(String displayName)
 	{

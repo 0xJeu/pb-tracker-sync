@@ -59,6 +59,12 @@ class PlayerSearchTab extends JPanel
 		listPanel.showMessage("Search a player to see their synced PBs.");
 	}
 
+	/** Every boss key this plugin knows about system-wide - forwarded to the list panel so untracked bosses can show a dash instead of being omitted. */
+	void setAllBosses(java.util.List<String> bosses)
+	{
+		listPanel.setAllBosses(bosses);
+	}
+
 	private void doSearch()
 	{
 		String name = searchField.getText().trim();
