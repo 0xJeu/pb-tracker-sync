@@ -56,7 +56,8 @@ class BossesTab extends JPanel
 	private final JScrollPane pickerScroll;
 	private final JPanel pickerSection = new JPanel(new BorderLayout());
 
-	private final JLabel selectedBossBar = new JLabel();
+	private final JPanel selectedBossBar = new JPanel(new BorderLayout(8, 0));
+	private final JLabel selectedBossNameLabel = new JLabel();
 	private final JPanel drillDownPanel = new JPanel();
 	private final JPanel leaderboardRows = new JPanel();
 	private final javax.swing.JTextArea leaderboardTitle = new javax.swing.JTextArea(" ");
@@ -244,19 +245,18 @@ class BossesTab extends JPanel
 
 	private void setUpSelectedBossBar()
 	{
-		selectedBossBar.setForeground(PbTrackerTheme.GOLD_LIGHT);
-		selectedBossBar.setFont(FontManager.getRunescapeBoldFont());
+		selectedBossBar.setBackground(PbTrackerTheme.BG);
 		selectedBossBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		selectedBossBar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		selectedBossBar.setToolTipText("Click to change boss");
-		selectedBossBar.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				showPicker();
-			}
-		});
+
+		selectedBossNameLabel.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		selectedBossNameLabel.setFont(FontManager.getRunescapeBoldFont());
+		selectedBossBar.add(selectedBossNameLabel, BorderLayout.CENTER);
+
+		// A real bordered button, not just "(change)" tacked onto the boss
+		// name as plain text - same clickableLabel style as the mode/size
+		// buttons below it, so it actually reads as something to click.
+		JLabel changeButton = clickableLabel("Change", this::showPicker);
+		selectedBossBar.add(changeButton, BorderLayout.EAST);
 	}
 
 	private void showPicker()
@@ -269,8 +269,8 @@ class BossesTab extends JPanel
 
 	private void showSelectedBossBar(String label, String iconKey)
 	{
-		selectedBossBar.setText(label + "   (change)");
-		selectedBossBar.setIcon(null);
+		selectedBossNameLabel.setText(label);
+		selectedBossNameLabel.setIcon(null);
 		selectedBossIconKey = iconKey;
 		// Guards against a slow-loading icon from a previous selection
 		// landing after the user has already picked a different boss.
@@ -278,10 +278,10 @@ class BossesTab extends JPanel
 		{
 			if (iconKey.equals(selectedBossIconKey))
 			{
-				selectedBossBar.setIcon(icon);
+				selectedBossNameLabel.setIcon(icon);
 			}
 		});
-		selectedBossBar.setIconTextGap(8);
+		selectedBossNameLabel.setIconTextGap(8);
 		pickerSection.setVisible(false);
 		selectedBossBar.setVisible(true);
 		revalidate();
