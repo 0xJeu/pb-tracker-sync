@@ -172,8 +172,6 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		ranked.sort(Comparator.comparingInt(r -> r.rank));
 
-		addHeadline(ranked.isEmpty() ? null : ranked.get(0));
-
 		addSectionHeader("Top Bosses", false);
 		for (int i = 0; i < Math.min(5, ranked.size()); i++)
 		{
@@ -276,32 +274,6 @@ class PbListPanel extends JPanel implements Scrollable
 			return new DisplayRow(key, key, primaryName, null, false, 0, 0, key, null);
 		}
 		return new DisplayRow(key, key, primaryName, null, true, pb.timeSeconds, pb.rank, pb.boss, null);
-	}
-
-	private void addHeadline(DisplayRow best)
-	{
-		JPanel panel = new JPanel();
-		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setBackground(PbTrackerTheme.BG);
-		panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-
-		if (best == null)
-		{
-			JLabel none = new JLabel("No ranked PBs yet.");
-			none.setForeground(PbTrackerTheme.TEXT_DIM);
-			panel.add(none);
-		}
-		else
-		{
-			JLabel pbLine = new JLabel("Overall PB: " + PbTrackerPlugin.formatTime(best.timeSeconds));
-			pbLine.setForeground(PbTrackerTheme.GOLD_LIGHT);
-			pbLine.setFont(FontManager.getRunescapeBoldFont());
-			JLabel rankLine = new JLabel("Overall Rank: #" + best.rank);
-			rankLine.setForeground(PbTrackerTheme.TEXT_DIM);
-			panel.add(pbLine);
-			panel.add(rankLine);
-		}
-		rowsContainer.add(panel);
 	}
 
 	private void addSectionHeader(String text, boolean collapsible)
@@ -460,6 +432,13 @@ class PbListPanel extends JPanel implements Scrollable
 		JTextArea line = wrappedLabel(variant.label + "   " + PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank, PbTrackerTheme.TEXT_DIM, false);
 		row.add(line, BorderLayout.CENTER);
 		PbTrackerPlugin.addRowClickListener(row, () -> onBossClick.accept(variant.key, displayName));
+
+		// Without this, BoxLayout falls back to this row's own narrow
+		// preferred width and default center alignment - it renders as a
+		// short bar shoved to one side instead of spanning the full row,
+		// same bug the section headers had (see addSectionHeader's comment).
+		row.setAlignmentX(0);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 		rowsContainer.add(row);
 	}
 
