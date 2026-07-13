@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
@@ -35,6 +36,7 @@ import java.util.function.BiConsumer;
  * which is what let long headings force the whole panel wider instead of
  * wrapping.
  */
+@Slf4j
 class PbListPanel extends JPanel implements Scrollable
 {
 	private final JPanel rowsContainer = new JPanel();
@@ -171,7 +173,7 @@ class PbListPanel extends JPanel implements Scrollable
 		row.content.add(buildHeadingLabel(group.heading));
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(timeText, group.summary.rank));
-		makeClickable(row.content, () -> onBossClick.accept(group.summary.key, displayName));
+		makeClickable(row.outer, () -> activateBoss(group.summary.key, displayName, onBossClick));
 		addFullWidthRow(row.outer);
 
 		for (BossGroups.PlayerRaidVariant variant : group.variants)
@@ -203,7 +205,7 @@ class PbListPanel extends JPanel implements Scrollable
 		line.setForeground(PbTrackerTheme.TEXT_DIM);
 
 		row.add(line, BorderLayout.CENTER);
-		makeClickable(row, () -> onBossClick.accept(variant.key, displayName));
+		makeClickable(row, () -> activateBoss(variant.key, displayName, onBossClick));
 		addFullWidthRow(row);
 	}
 
@@ -213,7 +215,7 @@ class PbListPanel extends JPanel implements Scrollable
 		row.content.add(buildHeadingLabel(PbTrackerPlugin.titleCase(pb.boss)));
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(PbTrackerPlugin.formatTime(pb.timeSeconds), pb.rank));
-		makeClickable(row.content, () -> onBossClick.accept(pb.boss, displayName));
+		makeClickable(row.outer, () -> activateBoss(pb.boss, displayName, onBossClick));
 		addFullWidthRow(row.outer);
 	}
 
@@ -321,7 +323,7 @@ class PbListPanel extends JPanel implements Scrollable
 		component.addMouseListener(new java.awt.event.MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
+			public void mousePressed(java.awt.event.MouseEvent e)
 			{
 				onClick.run();
 			}
@@ -333,5 +335,11 @@ class PbListPanel extends JPanel implements Scrollable
 				makeClickable(child, onClick);
 			}
 		}
+	}
+
+	private static void activateBoss(String bossKey, String displayName, BiConsumer<String, String> onBossClick)
+	{
+		log.debug("PB row activated: boss={}, player={}", bossKey, displayName);
+		onBossClick.accept(bossKey, displayName);
 	}
 }

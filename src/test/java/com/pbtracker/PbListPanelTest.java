@@ -37,7 +37,7 @@ public class PbListPanelTest
 			panel.showPlayer(player, (boss, name) -> clicked.set(true));
 
 			JTextArea heading = findTextArea(panel, "Zulrah");
-			heading.dispatchEvent(new MouseEvent(heading, MouseEvent.MOUSE_CLICKED,
+			heading.dispatchEvent(new MouseEvent(heading, MouseEvent.MOUSE_PRESSED,
 				System.currentTimeMillis(), 0, 2, 2, 1, false));
 		});
 		assertTrue(clicked.get());

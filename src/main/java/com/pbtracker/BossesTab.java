@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
@@ -41,6 +42,7 @@ import java.util.function.Consumer;
  * pattern - keeps the sidebar's limited vertical space for the leaderboard
  * instead of a permanently-open list.
  */
+@Slf4j
 class BossesTab extends JPanel
 {
 	private static final String PLACEHOLDER = "Search bosses...";
@@ -230,7 +232,7 @@ class BossesTab extends JPanel
 		selectedBossBar.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(MouseEvent e)
+			public void mousePressed(MouseEvent e)
 			{
 				showPicker();
 			}
@@ -434,6 +436,7 @@ class BossesTab extends JPanel
 
 	private void loadLeaderboard(String bossKey, String title)
 	{
+		log.debug("Requesting leaderboard: boss={}, highlight={}", bossKey, pendingHighlight);
 		leaderboardTitle.setText(title);
 		leaderboardRows.removeAll();
 		JLabel loading = new JLabel("Loading...");
@@ -543,7 +546,7 @@ class BossesTab extends JPanel
 		component.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(MouseEvent e)
+			public void mousePressed(MouseEvent e)
 			{
 				onClick.run();
 			}
@@ -560,6 +563,7 @@ class BossesTab extends JPanel
 	/** Called from the "jump to leaderboard, scrolled to this player" flow (rank click on a PB row). */
 	void showBossHighlighted(String bossKey, String highlightPlayerName)
 	{
+		log.debug("Opening highlighted leaderboard: boss={}, player={}", bossKey, highlightPlayerName);
 		pendingHighlight = highlightPlayerName;
 		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey));
 		drillDownPanel.removeAll();

@@ -382,13 +382,27 @@ public class PbTrackerPlugin extends Plugin
 		}
 		if (sidePanel != null)
 		{
-			executor.schedule(() -> javax.swing.SwingUtilities.invokeLater(() ->
-			{
-				if (client.getGameState() == GameState.LOGGED_IN && client.getLocalPlayer() != null)
-				{
-					sidePanel.onLocalPlayerChanged(client.getLocalPlayer().getName());
-				}
-			}), 5, TimeUnit.SECONDS);
+			loadLocalPlayerPanelWhenReady(0);
+		}
+	}
+
+	private void loadLocalPlayerPanelWhenReady(int attempt)
+	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		Player localPlayer = client.getLocalPlayer();
+		if (localPlayer != null && localPlayer.getName() != null)
+		{
+			String displayName = localPlayer.getName();
+			log.debug("Loading My PBs sidebar for {} on attempt {}", displayName, attempt + 1);
+			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(displayName));
+			return;
+		}
+		if (attempt < 4)
+		{
+			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1), 1, TimeUnit.SECONDS);
 		}
 	}
 
