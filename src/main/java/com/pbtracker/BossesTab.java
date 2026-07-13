@@ -1,12 +1,14 @@
 package com.pbtracker;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -48,6 +50,7 @@ class BossesTab extends JPanel
 	private static final String PLACEHOLDER = "Search bosses...";
 
 	private final SyncClient syncClient;
+	private final SpriteManager spriteManager;
 	private final Consumer<String> onPlayerClick;
 
 	private final DefaultListModel<PickerEntry> listModel = new DefaultListModel<>();
@@ -56,7 +59,8 @@ class BossesTab extends JPanel
 	private final JScrollPane pickerScroll;
 	private final JPanel pickerSection = new JPanel(new BorderLayout());
 
-	private final JLabel selectedBossBar = new JLabel();
+	private final JPanel selectedBossBar = new JPanel(new BorderLayout(8, 0));
+	private final JLabel selectedBossNameLabel = new JLabel();
 	private final JPanel drillDownPanel = new JPanel();
 	private final JPanel leaderboardRows = new JPanel();
 	private final javax.swing.JTextArea leaderboardTitle = new javax.swing.JTextArea(" ");
@@ -64,6 +68,7 @@ class BossesTab extends JPanel
 	private List<String> allBosses = List.of();
 	private String pendingHighlight;
 	private long leaderboardRequestGeneration;
+	private String selectedBossIconKey;
 
 	private static final class PickerEntry
 	{
@@ -79,9 +84,10 @@ class BossesTab extends JPanel
 		}
 	}
 
-	BossesTab(SyncClient syncClient, Consumer<String> onPlayerClick)
+	BossesTab(SyncClient syncClient, SpriteManager spriteManager, Consumer<String> onPlayerClick)
 	{
 		this.syncClient = syncClient;
+		this.spriteManager = spriteManager;
 		this.onPlayerClick = onPlayerClick;
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
@@ -185,7 +191,7 @@ class BossesTab extends JPanel
 		pickerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		pickerList.setSelectionBackground(PbTrackerTheme.HIGHLIGHT_BG);
 		pickerList.setSelectionForeground(PbTrackerTheme.GOLD_LIGHT);
-		pickerList.setFixedCellHeight(26);
+		pickerList.setFixedCellHeight(36);
 		pickerList.setCellRenderer(new PickerEntryRenderer());
 		pickerList.addListSelectionListener(e ->
 		{
@@ -196,8 +202,16 @@ class BossesTab extends JPanel
 		});
 	}
 
-	/** Bold + a "raid" marker for raid bases, plain for everything else, proper padding either way. */
-	private static final class PickerEntryRenderer extends DefaultListCellRenderer
+	/**
+	 * Bold + a "raid" marker for raid bases, plain for everything else,
+	 * proper padding either way. The icon label is a shared, transient
+	 * component JList reuses across every row it paints - a sprite that
+	 * finishes loading asynchronously can't safely be applied to it
+	 * directly (it may already be rendering a different row), so an
+	 * uncached icon triggers a fetch that just repaints the list once
+	 * ready, and the next render pass picks it up from the cache.
+	 */
+	private final class PickerEntryRenderer extends DefaultListCellRenderer
 	{
 		@Override
 		public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus)
@@ -205,6 +219,17 @@ class BossesTab extends JPanel
 			JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 			PickerEntry entry = (PickerEntry) value;
 			label.setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 10));
+			javax.swing.ImageIcon icon = BossIcons.getCached(entry.key);
+			if (icon != null)
+			{
+				label.setIcon(icon);
+			}
+			else
+			{
+				label.setIcon(null);
+				BossIcons.get(spriteManager, entry.key, loaded -> list.repaint());
+			}
+			label.setIconTextGap(8);
 			if (entry.isRaidBase)
 			{
 				// Plain ASCII rather than a Unicode arrow - see the chevron
@@ -224,19 +249,19 @@ class BossesTab extends JPanel
 
 	private void setUpSelectedBossBar()
 	{
-		selectedBossBar.setForeground(PbTrackerTheme.GOLD_LIGHT);
-		selectedBossBar.setFont(FontManager.getRunescapeBoldFont());
+		selectedBossBar.setBackground(PbTrackerTheme.BG);
 		selectedBossBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		selectedBossBar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		selectedBossBar.setToolTipText("Click to change boss");
-		selectedBossBar.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				showPicker();
-			}
-		});
+
+		selectedBossNameLabel.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		java.awt.Font nameFont = FontManager.getRunescapeBoldFont();
+		selectedBossNameLabel.setFont(nameFont.deriveFont(nameFont.getSize2D() + 2f));
+		selectedBossBar.add(selectedBossNameLabel, BorderLayout.CENTER);
+
+		// A real bordered button, not just "(change)" tacked onto the boss
+		// name as plain text - same clickableLabel style as the mode/size
+		// buttons below it, so it actually reads as something to click.
+		JLabel changeButton = clickableLabel("Change", this::showPicker);
+		selectedBossBar.add(changeButton, BorderLayout.EAST);
 	}
 
 	private void showPicker()
@@ -247,9 +272,21 @@ class BossesTab extends JPanel
 		repaint();
 	}
 
-	private void showSelectedBossBar(String label)
+	private void showSelectedBossBar(String label, String iconKey)
 	{
-		selectedBossBar.setText(label + "   (change)");
+		selectedBossNameLabel.setText(label);
+		selectedBossNameLabel.setIcon(null);
+		selectedBossIconKey = iconKey;
+		// Guards against a slow-loading icon from a previous selection
+		// landing after the user has already picked a different boss.
+		BossIcons.get(spriteManager, iconKey, icon ->
+		{
+			if (iconKey.equals(selectedBossIconKey))
+			{
+				selectedBossNameLabel.setIcon(icon);
+			}
+		});
+		selectedBossNameLabel.setIconTextGap(8);
 		pickerSection.setVisible(false);
 		selectedBossBar.setVisible(true);
 		revalidate();
@@ -317,9 +354,17 @@ class BossesTab extends JPanel
 		}
 		entries.sort(Comparator.comparing(en -> en.label));
 
+		// Same shorthand the !pbr chat command accepts ("tob", "cox", "sol",
+		// etc, from PbTrackerPlugin.BOSS_ALIASES) - typing an abbreviation
+		// filters the picker to that boss too, not just its full name.
+		String aliasTarget = PbTrackerPlugin.BOSS_ALIASES.get(filter);
+		String normalizedAliasTarget = aliasTarget != null ? BossGroups.normalize(aliasTarget) : null;
+
 		for (PickerEntry entry : entries)
 		{
-			if (filter.isEmpty() || entry.label.toLowerCase().contains(filter))
+			boolean matchesText = filter.isEmpty() || entry.label.toLowerCase().contains(filter);
+			boolean matchesAlias = normalizedAliasTarget != null && BossGroups.normalize(entry.key).equals(normalizedAliasTarget);
+			if (matchesText || matchesAlias)
 			{
 				listModel.addElement(entry);
 			}
@@ -329,7 +374,7 @@ class BossesTab extends JPanel
 	private void onPickerSelection(PickerEntry entry)
 	{
 		drillDownPanel.removeAll();
-		showSelectedBossBar(entry.label);
+		showSelectedBossBar(entry.label, entry.key);
 
 		if (!entry.isRaidBase)
 		{
@@ -372,29 +417,65 @@ class BossesTab extends JPanel
 		selectMode(modes.get(0), entry.label, sizeRow);
 	}
 
+	/**
+	 * A dropdown rather than a row of pill buttons - a raid+mode can have a
+	 * dozen-plus size/kind variants (1-5 players x Overall/Room, sometimes
+	 * legacy entries too), and a wall of buttons either wraps into a mess or
+	 * gets visually lost. A combo box scales to however many there are
+	 * without crowding anything else in the sidebar.
+	 */
 	private void selectMode(BossGroups.RaidMode mode, String raidLabel, JPanel sizeRow)
 	{
 		sizeRow.removeAll();
-		List<JLabel> sizeLabels = new ArrayList<>();
-		for (BossGroups.KeyLabel variant : mode.variants)
+		sizeRow.setLayout(new BorderLayout());
+
+		if (mode.variants.isEmpty())
 		{
-			JLabel sizeLabel = clickableLabel(variant.label, () ->
-			{
-				setActiveLabel(sizeLabels, sizeLabels.get(mode.variants.indexOf(variant)));
-				loadLeaderboard(variant.key, raidLabel + " - " + mode.modeLabel + " - " + variant.label);
-			});
-			sizeLabels.add(sizeLabel);
-			sizeRow.add(sizeLabel);
+			sizeRow.revalidate();
+			sizeRow.repaint();
+			return;
 		}
+
+		JComboBox<BossGroups.KeyLabel> sizeCombo = new JComboBox<>(mode.variants.toArray(new BossGroups.KeyLabel[0]));
+		sizeCombo.setBackground(PbTrackerTheme.PANEL);
+		sizeCombo.setForeground(PbTrackerTheme.TEXT);
+		java.awt.Font comboFont = FontManager.getRunescapeFont();
+		sizeCombo.setFont(comboFont.deriveFont(comboFont.getSize2D() + 2f));
+		sizeCombo.setBorder(BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER));
+		sizeCombo.setPreferredSize(new Dimension(0, 32));
+		sizeCombo.setFocusable(false);
+		// Without this, the dropdown list that opens on click uses Swing's
+		// default plain black-on-white renderer instead of the theme - the
+		// box itself picks up setForeground, but the popup list doesn't.
+		sizeCombo.setRenderer(new DefaultListCellRenderer()
+		{
+			@Override
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus)
+			{
+				JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+				label.setBackground(isSelected ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
+				label.setForeground(isSelected ? PbTrackerTheme.GOLD_LIGHT : PbTrackerTheme.TEXT);
+				label.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+				return label;
+			}
+		});
+		sizeCombo.addActionListener(e ->
+		{
+			BossGroups.KeyLabel selected = (BossGroups.KeyLabel) sizeCombo.getSelectedItem();
+			if (selected != null)
+			{
+				loadLeaderboard(selected.key, raidLabel + " - " + mode.modeLabel + " - " + selected.label);
+			}
+		});
+		sizeRow.add(sizeCombo, BorderLayout.CENTER);
 		sizeRow.revalidate();
 		sizeRow.repaint();
 
-		if (!mode.variants.isEmpty())
-		{
-			BossGroups.KeyLabel first = mode.variants.get(0);
-			setActiveLabel(sizeLabels, sizeLabels.get(0));
-			loadLeaderboard(first.key, raidLabel + " - " + mode.modeLabel + " - " + first.label);
-		}
+		// The combo box already defaults to index 0, but Swing only fires
+		// the ActionListener on an actual change - load the first size's
+		// leaderboard directly so one shows immediately, same as before.
+		BossGroups.KeyLabel first = mode.variants.get(0);
+		loadLeaderboard(first.key, raidLabel + " - " + mode.modeLabel + " - " + first.label);
 	}
 
 	/** Marks one label in the row as the active selection (gold border/text), clearing the others. */
@@ -407,7 +488,7 @@ class BossesTab extends JPanel
 			label.setForeground(isActive ? PbTrackerTheme.GOLD_LIGHT : PbTrackerTheme.TEXT);
 			label.setBorder(BorderFactory.createCompoundBorder(
 				BorderFactory.createLineBorder(isActive ? PbTrackerTheme.GOLD : PbTrackerTheme.PANEL_BORDER),
-				BorderFactory.createEmptyBorder(3, 8, 3, 8)
+				BorderFactory.createEmptyBorder(5, 10, 5, 10)
 			));
 		}
 	}
@@ -416,9 +497,10 @@ class BossesTab extends JPanel
 	{
 		JLabel label = new JLabel(text);
 		label.setForeground(PbTrackerTheme.TEXT);
+		label.setFont(FontManager.getRunescapeBoldFont());
 		label.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER),
-			BorderFactory.createEmptyBorder(3, 8, 3, 8)
+			BorderFactory.createEmptyBorder(5, 10, 5, 10)
 		));
 		label.setOpaque(true);
 		label.setBackground(PbTrackerTheme.PANEL);
@@ -426,7 +508,7 @@ class BossesTab extends JPanel
 		label.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(MouseEvent e)
+			public void mousePressed(MouseEvent e)
 			{
 				onClick.run();
 			}
@@ -437,7 +519,7 @@ class BossesTab extends JPanel
 	private void loadLeaderboard(String bossKey, String title)
 	{
 		log.debug("Requesting leaderboard: boss={}, highlight={}", bossKey, pendingHighlight);
-		leaderboardTitle.setText(title);
+		leaderboardTitle.setText(PbTrackerPlugin.wrapFriendly(title));
 		leaderboardRows.removeAll();
 		JLabel loading = new JLabel("Loading...");
 		loading.setForeground(PbTrackerTheme.TEXT_DIM);
@@ -465,6 +547,7 @@ class BossesTab extends JPanel
 	private void renderLeaderboard(List<SyncClient.LeaderboardRow> rows, String highlight)
 	{
 		leaderboardRows.removeAll();
+		JPanel highlightedRow = null;
 		if (rows == null)
 		{
 			JLabel error = new JLabel("Lookup failed - try again later.");
@@ -483,11 +566,29 @@ class BossesTab extends JPanel
 			{
 				SyncClient.LeaderboardRow row = rows.get(i);
 				boolean isHighlighted = highlight != null && row.displayName.equalsIgnoreCase(highlight);
-				leaderboardRows.add(buildLeaderboardRow(i + 1, row, isHighlighted));
+				JPanel rowPanel = buildLeaderboardRow(i + 1, row, isHighlighted);
+				leaderboardRows.add(rowPanel);
+				if (isHighlighted)
+				{
+					highlightedRow = rowPanel;
+				}
 			}
 		}
 		leaderboardRows.revalidate();
 		leaderboardRows.repaint();
+
+		// Jumping here from a PB row is pointless if the player's own rank
+		// isn't actually visible without manually scrolling - bring it into
+		// view automatically. Deferred one tick so the rows above it have
+		// already been laid out and their heights are known.
+		if (highlightedRow != null)
+		{
+			JPanel target = highlightedRow;
+			// scrollRectToVisible wants a rect in the component's OWN
+			// coordinate space (0,0 to its own size), not its bounds
+			// relative to its parent.
+			SwingUtilities.invokeLater(() -> target.scrollRectToVisible(new java.awt.Rectangle(0, 0, target.getWidth(), target.getHeight())));
+		}
 	}
 
 	// Gold/silver/bronze for the top 3, matching a medal-podium convention -
@@ -536,28 +637,8 @@ class BossesTab extends JPanel
 		));
 		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
 
-		makeClickable(panel, () -> onPlayerClick.accept(row.displayName));
+		PbTrackerPlugin.addRowClickListener(panel, () -> onPlayerClick.accept(row.displayName));
 		return panel;
-	}
-
-	private static void makeClickable(Component component, Runnable onClick)
-	{
-		component.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		component.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				onClick.run();
-			}
-		});
-		if (component instanceof java.awt.Container)
-		{
-			for (Component child : ((java.awt.Container) component).getComponents())
-			{
-				makeClickable(child, onClick);
-			}
-		}
 	}
 
 	/** Called from the "jump to leaderboard, scrolled to this player" flow (rank click on a PB row). */
@@ -565,7 +646,7 @@ class BossesTab extends JPanel
 	{
 		log.debug("Opening highlighted leaderboard: boss={}, player={}", bossKey, highlightPlayerName);
 		pendingHighlight = highlightPlayerName;
-		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey));
+		showSelectedBossBar(PbTrackerPlugin.titleCase(bossKey), bossKey);
 		drillDownPanel.removeAll();
 		drillDownPanel.revalidate();
 		drillDownPanel.repaint();

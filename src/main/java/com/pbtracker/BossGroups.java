@@ -272,6 +272,12 @@ final class BossGroups
 			this.key = key;
 			this.label = label;
 		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
 	}
 
 	/** One RaidGroup per raid+mode heading, found across every bare boss key in `bosses`. */
@@ -299,10 +305,31 @@ final class BossGroups
 			List<RaidVariant> sorted = new ArrayList<>(variants);
 			sorted.sort(Comparator.<RaidVariant>comparingInt(v -> teamSizeRank(v.subLabel))
 				.thenComparingInt(v -> variantRank(v.subLabel)));
-			List<KeyLabel> variantList = new ArrayList<>();
+
+			// Compact "Fastest Overall (1 Player Hard Mode)" down to just
+			// "1 Player" (sizeLabel()) like the player-specific grouping
+			// already does - otherwise every team-size button repeats the
+			// same wall of near-identical verbose text and doesn't read as
+			// a size picker at all. Two variants can still share a team
+			// size (an "Overall" time and a "Room" time), so disambiguate
+			// those with an "Overall"/"Room" suffix only when they collide.
+			List<String> niceLabels = new ArrayList<>();
 			for (RaidVariant v : sorted)
 			{
-				variantList.add(new KeyLabel(v.key, v.subLabel));
+				String nice = sizeLabel(v.subLabel);
+				niceLabels.add(nice != null ? nice : v.subLabel);
+			}
+			Map<String, Integer> labelCounts = new LinkedHashMap<>();
+			for (String label : niceLabels)
+			{
+				labelCounts.merge(label, 1, Integer::sum);
+			}
+			List<KeyLabel> variantList = new ArrayList<>();
+			for (int i = 0; i < sorted.size(); i++)
+			{
+				String nice = niceLabels.get(i);
+				String finalLabel = labelCounts.get(nice) > 1 ? nice + " - " + kindName(variantKind(sorted.get(i).subLabel)) : nice;
+				variantList.add(new KeyLabel(sorted.get(i).key, finalLabel));
 			}
 			groups.add(new RaidGroup(variants.get(0).heading, variants.get(0).base, variants.get(0).mode, variantList));
 		}
@@ -322,6 +349,21 @@ final class BossGroups
 			this.base = base;
 			this.label = label;
 		}
+	}
+
+	/** Every non-raid boss key in `bosses`, deduplicated - for enumerating "every boss that could show up" regardless of whether this player has PBs for it. */
+	static List<String> getFlatBossKeys(List<String> bosses)
+	{
+		List<String> flat = new ArrayList<>();
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		for (String b : bosses)
+		{
+			if (!isGroupedVariant(b) && seen.add(b.trim().toLowerCase()))
+			{
+				flat.add(b);
+			}
+		}
+		return flat;
 	}
 
 	/** One row per raid base (mode-independent) - for the top-level "pick a raid" list. */

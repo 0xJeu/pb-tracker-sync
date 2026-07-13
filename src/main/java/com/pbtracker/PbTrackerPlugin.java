@@ -179,7 +179,7 @@ public class PbTrackerPlugin extends Plugin
 	// vorkath" work without needing an entry - this map only exists for
 	// content whose stored key doesn't match what a player would naturally
 	// type (raid abbreviations, "the X" bosses, etc).
-	private static final Map<String, String> BOSS_ALIASES = new HashMap<>();
+	static final Map<String, String> BOSS_ALIASES = new HashMap<>();
 	static
 	{
 		BOSS_ALIASES.put("tob", "theatre of blood");
@@ -193,6 +193,7 @@ public class PbTrackerPlugin extends Plugin
 		BOSS_ALIASES.put("zuk", "inferno");
 		BOSS_ALIASES.put("colo", "fortis colosseum");
 		BOSS_ALIASES.put("colosseum", "fortis colosseum");
+		BOSS_ALIASES.put("sol", "fortis colosseum");
 		BOSS_ALIASES.put("gaunt", "the gauntlet");
 		BOSS_ALIASES.put("gauntlet", "the gauntlet");
 		BOSS_ALIASES.put("cgaunt", "the corrupted gauntlet");
@@ -246,6 +247,9 @@ public class PbTrackerPlugin extends Plugin
 	@Inject
 	private net.runelite.client.ui.ClientToolbar clientToolbar;
 
+	@Inject
+	private net.runelite.client.game.SpriteManager spriteManager;
+
 	private PbTrackerSidePanel sidePanel;
 	private net.runelite.client.ui.NavigationButton navButton;
 
@@ -271,7 +275,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
@@ -674,6 +678,48 @@ public class PbTrackerPlugin extends Plugin
 			}
 		}
 		return result.toString();
+	}
+
+	/**
+	 * JTextArea's word-wrap only breaks at whitespace, not at hyphens - a
+	 * long hyphenated compound like "Tzhaar-Ket-Rak's" has no spaces at all
+	 * in its first 16 characters, so on the sidebar's narrow width it
+	 * doesn't fit on one line and gets forced into an ugly mid-syllable
+	 * character break ("Tzhaar-ke" / "t-rak's") instead. Inserting a space
+	 * after each hyphen gives the wrapper a natural place to break instead.
+	 */
+	static String wrapFriendly(String text)
+	{
+		return text.replace("-", "- ");
+	}
+
+	/**
+	 * Swing delivers a mouse click to whichever component is directly under
+	 * the cursor, not to its ancestors - there's no automatic bubbling like
+	 * in a browser DOM. A listener attached only to a row's outer container
+	 * therefore only fires when a click lands on a sliver of uncovered
+	 * background; since icon/text/label children typically fill nearly the
+	 * whole row, most clicks on a "clickable row" were silently doing
+	 * nothing. Attaching the same listener to every descendant fixes that.
+	 */
+	static void addRowClickListener(java.awt.Component component, Runnable onClick)
+	{
+		component.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		component.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mousePressed(java.awt.event.MouseEvent e)
+			{
+				onClick.run();
+			}
+		});
+		if (component instanceof java.awt.Container)
+		{
+			for (java.awt.Component child : ((java.awt.Container) component).getComponents())
+			{
+				addRowClickListener(child, onClick);
+			}
+		}
 	}
 
 	// Explicit mode keyword -> the exact mode text OVERALL_LABEL_PATTERN

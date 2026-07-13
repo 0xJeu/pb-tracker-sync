@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import net.runelite.client.game.SpriteManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -21,15 +22,16 @@ class PlayerSearchTab extends JPanel
 {
 	private final SyncClient syncClient;
 	private final BiConsumer<String, String> onBossClickHandler;
-	private final PbListPanel listPanel = new PbListPanel();
+	private final PbListPanel listPanel;
 	private final JTextField searchField = new JTextField();
 	private final JScrollPane scrollPane;
 	private long requestGeneration;
 
-	PlayerSearchTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
+	PlayerSearchTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
+		this.listPanel = new PbListPanel(spriteManager);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
@@ -57,6 +59,12 @@ class PlayerSearchTab extends JPanel
 		add(scrollPane, BorderLayout.CENTER);
 
 		listPanel.showMessage("Search a player to see their synced PBs.");
+	}
+
+	/** Every boss key this plugin knows about system-wide - forwarded to the list panel so untracked bosses can show a dash instead of being omitted. */
+	void setAllBosses(java.util.List<String> bosses)
+	{
+		listPanel.setAllBosses(bosses);
 	}
 
 	private void doSearch()

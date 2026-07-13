@@ -26,7 +26,7 @@ public class PbListPanelTest
 		AtomicBoolean clicked = new AtomicBoolean();
 		SwingUtilities.invokeAndWait(() ->
 		{
-			PbListPanel panel = new PbListPanel();
+			PbListPanel panel = new PbListPanel(null);
 			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
 			player.displayName = "Tester";
 			SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
