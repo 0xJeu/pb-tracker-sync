@@ -2,6 +2,7 @@ package com.pbtracker;
 
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.MenuAction;
@@ -16,6 +17,7 @@ import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.chat.ChatCommandManager;
+import net.runelite.client.chat.ChatColorType;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -148,17 +150,6 @@ public class PbTrackerPlugin extends Plugin
 
 	private static final String PBR_COMMAND_STRING = "!pbr";
 
-	// Explicit colors for !pbr's chat output rather than ChatColorType.NORMAL/
-	// HIGHLIGHT - those defer to the player's own configured chat colors,
-	// which on some setups render nearly identically (e.g. both a similar
-	// blue), making the response hard to read at a glance. These give three
-	// clearly distinct colors regardless of client theme - white for labels,
-	// the PB Tracker site's own gold for the time, green for rank.
-	private static final Color PBR_LABEL_COLOR = new Color(255, 255, 255);
-	private static final Color PBR_TIME_COLOR = new Color(255, 152, 31);
-	private static final Color PBR_RANK_COLOR = new Color(0, 200, 83);
-	private static final Color PBR_ERROR_COLOR = new Color(255, 255, 255);
-
 	// Matches the part of a synced boss key after the raid's bare prefix has
 	// been stripped, e.g. for "theatre of blood - hard - fastest overall (4
 	// player hard mode)" this matches against " - hard - fastest overall (4
@@ -256,6 +247,7 @@ public class PbTrackerPlugin extends Plugin
 	private String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
+	private Dt2Scoreboard pendingDt2Scoreboard;
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -877,8 +869,8 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	/**
-	 * Chat command handler for "!pbr <boss>[ <size>]" - looks up the local
-	 * player's synced personal best and leaderboard rank for that boss (and,
+	 * Chat command handler for "!pbr <boss>[ <size>]" - looks up the command
+	 * sender's synced personal best and leaderboard rank for that boss (and,
 	 * for raids, optionally a specific team size) from the PB tracker
 	 * backend and prints it in chat. Registered via registerCommandAsync,
 	 * which RuneLite already runs off the client thread, so the blocking
@@ -906,9 +898,15 @@ public class PbTrackerPlugin extends Plugin
 			return;
 		}
 
-		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		String localPlayerName = client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName();
+		String playerName = resolvePbrPlayerName(
+			chatMessage.getName(),
+			chatMessage.getType() == ChatMessageType.PRIVATECHATOUT,
+			localPlayerName
+		);
+		if (playerName == null)
 		{
-			respondPbr(chatMessage, "Not logged in yet.");
+			respondPbr(chatMessage, "Could not determine who requested this PB lookup.");
 			return;
 		}
 
@@ -920,8 +918,6 @@ public class PbTrackerPlugin extends Plugin
 		String[] modeAlias = MODE_SPECIFIC_ALIASES.get(bossArg.trim().toLowerCase());
 		String boss = modeAlias != null ? modeAlias[0] : resolveBossAlias(bossArg);
 		String requiredMode = modeAlias != null ? modeAlias[1] : parsedMode;
-
-		String playerName = client.getLocalPlayer().getName();
 
 		SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(playerName);
 		switch (result.kind)
@@ -948,10 +944,14 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		String response = new ChatMessageBuilder()
-			.append(PBR_LABEL_COLOR, titleCase(match.boss) + " personal best: ")
-			.append(PBR_TIME_COLOR, formatTime(match.timeSeconds))
-			.append(PBR_LABEL_COLOR, "  Rank: ")
-			.append(PBR_RANK_COLOR, "#" + match.rank)
+			.append(ChatColorType.NORMAL)
+			.append(titleCase(match.boss) + " personal best: ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(formatTime(match.timeSeconds))
+			.append(ChatColorType.NORMAL)
+			.append("  Rank: ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append("#" + match.rank)
 			.build();
 
 		MessageNode messageNode = chatMessage.getMessageNode();
@@ -962,7 +962,8 @@ public class PbTrackerPlugin extends Plugin
 	private void respondPbr(ChatMessage chatMessage, String text)
 	{
 		String formatted = new ChatMessageBuilder()
-			.append(PBR_ERROR_COLOR, text)
+			.append(ChatColorType.NORMAL)
+			.append(text)
 			.build();
 		MessageNode messageNode = chatMessage.getMessageNode();
 		messageNode.setRuneLiteFormatMessage(formatted);
@@ -978,11 +979,26 @@ public class PbTrackerPlugin extends Plugin
 			// isn't populated until the following game tick.
 			journalScrollLoaded = true;
 		}
+
+		Dt2Scoreboard scoreboard = dt2ScoreboardForGroup(event.getGroupId());
+		if (scoreboard != null)
+		{
+			// The title and PB widgets populate after WidgetLoaded, so read them
+			// on the following game tick just like the Adventure Log parser.
+			pendingDt2Scoreboard = scoreboard;
+		}
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		if (pendingDt2Scoreboard != null)
+		{
+			Dt2Scoreboard scoreboard = pendingDt2Scoreboard;
+			pendingDt2Scoreboard = null;
+			syncDt2Scoreboard(scoreboard);
+		}
+
 		if (!journalScrollLoaded)
 		{
 			return;
@@ -1091,6 +1107,81 @@ public class PbTrackerPlugin extends Plugin
 		{
 			log.debug("Parsed {} PB(s) from Adventure Log Counters page", pbs.size());
 			syncPbs(pbs);
+		}
+	}
+
+	static String resolvePbrPlayerName(String messageName, boolean outgoingPrivateMessage, String localPlayerName)
+	{
+		String candidate = outgoingPrivateMessage || messageName == null ? localPlayerName : Text.sanitize(messageName);
+		if (candidate == null || candidate.trim().isEmpty())
+		{
+			candidate = localPlayerName;
+		}
+		return candidate == null || candidate.trim().isEmpty() ? null : candidate.trim();
+	}
+
+	private void syncDt2Scoreboard(Dt2Scoreboard scoreboard)
+	{
+		Widget titleWidget = client.getWidget(scoreboard.titleComponentId);
+		Widget pbWidget = client.getWidget(scoreboard.pbComponentId);
+		String title = titleWidget == null || titleWidget.getText() == null
+			? null
+			: Text.removeTags(titleWidget.getText());
+		String bossKey = dt2ScoreboardBossKey(scoreboard.bossName, title);
+		String rawTime = pbWidget == null || pbWidget.getText() == null
+			? null
+			: Text.removeTags(pbWidget.getText()).trim();
+		Double seconds = rawTime == null ? null : parseTimeString(rawTime);
+
+		if (bossKey == null || seconds == null)
+		{
+			log.debug("DT2 scoreboard was missing a recognizable title or PB value: title={}, value={}", title, rawTime);
+			return;
+		}
+
+		Map<String, Double> pb = new HashMap<>();
+		pb.put(bossKey, seconds);
+		log.debug("Recovered {} PB {} from its in-game scoreboard", bossKey, rawTime);
+		syncPbs(pb);
+	}
+
+	static String dt2ScoreboardBossKey(String bossName, String title)
+	{
+		if (bossName == null || title == null || !title.toLowerCase().contains(bossName.toLowerCase()))
+		{
+			return null;
+		}
+		return bossName + (title.toLowerCase().contains("awakened") ? " (awakened)" : "");
+	}
+
+	private static Dt2Scoreboard dt2ScoreboardForGroup(int groupId)
+	{
+		switch (groupId)
+		{
+			case InterfaceID.DUKE_SUCELLUS_SCOREBOARD:
+				return new Dt2Scoreboard("Duke Sucellus", InterfaceID.DukeSucellusScoreboard.TITLE_TEXT, InterfaceID.DukeSucellusScoreboard.PBT_CONTENT);
+			case InterfaceID.LEVIATHAN_SCOREBOARD:
+				return new Dt2Scoreboard("Leviathan", InterfaceID.LeviathanScoreboard.TITLE_TEXT, InterfaceID.LeviathanScoreboard.PBT_CONTENT);
+			case InterfaceID.WHISPERER_SCOREBOARD:
+				return new Dt2Scoreboard("Whisperer", InterfaceID.WhispererScoreboard.TITLE_TEXT, InterfaceID.WhispererScoreboard.PBT_CONTENT);
+			case InterfaceID.VARDORVIS_SCOREBOARD:
+				return new Dt2Scoreboard("Vardorvis", InterfaceID.VardorvisScoreboard.TITLE_TEXT, InterfaceID.VardorvisScoreboard.PBT_CONTENT);
+			default:
+				return null;
+		}
+	}
+
+	private static final class Dt2Scoreboard
+	{
+		private final String bossName;
+		private final int titleComponentId;
+		private final int pbComponentId;
+
+		private Dt2Scoreboard(String bossName, int titleComponentId, int pbComponentId)
+		{
+			this.bossName = bossName;
+			this.titleComponentId = titleComponentId;
+			this.pbComponentId = pbComponentId;
 		}
 	}
 
