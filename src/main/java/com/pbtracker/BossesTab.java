@@ -427,12 +427,27 @@ class BossesTab extends JPanel
 
 		JComboBox<BossGroups.KeyLabel> sizeCombo = new JComboBox<>(mode.variants.toArray(new BossGroups.KeyLabel[0]));
 		sizeCombo.setBackground(PbTrackerTheme.PANEL);
-		sizeCombo.setForeground(PbTrackerTheme.TEXT);
+		sizeCombo.setForeground(PbTrackerTheme.GOLD_LIGHT);
 		java.awt.Font comboFont = FontManager.getRunescapeFont();
 		sizeCombo.setFont(comboFont.deriveFont(comboFont.getSize2D() + 2f));
 		sizeCombo.setBorder(BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER));
 		sizeCombo.setPreferredSize(new Dimension(0, 32));
 		sizeCombo.setFocusable(false);
+		// Without this, the dropdown list that opens on click uses Swing's
+		// default plain black-on-white renderer instead of the theme - the
+		// box itself picks up setForeground, but the popup list doesn't.
+		sizeCombo.setRenderer(new DefaultListCellRenderer()
+		{
+			@Override
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus)
+			{
+				JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+				label.setBackground(isSelected ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
+				label.setForeground(isSelected ? PbTrackerTheme.GOLD : PbTrackerTheme.GOLD_LIGHT);
+				label.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+				return label;
+			}
+		});
 		sizeCombo.addActionListener(e ->
 		{
 			BossGroups.KeyLabel selected = (BossGroups.KeyLabel) sizeCombo.getSelectedItem();
