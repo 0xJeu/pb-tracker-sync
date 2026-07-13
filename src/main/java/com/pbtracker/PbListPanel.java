@@ -333,6 +333,12 @@ class PbListPanel extends JPanel implements Scrollable
 			});
 		}
 
+		// Without this, BoxLayout falls back to the row's own narrow
+		// preferred width and its default 0.5 alignmentX, which visually
+		// reads as a short bar shoved off-center instead of a full-width
+		// header - see the data rows' identical treatment below for why.
+		row.setAlignmentX(0);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 		rowsContainer.add(row);
 	}
 
@@ -394,7 +400,24 @@ class PbListPanel extends JPanel implements Scrollable
 			dash.setForeground(PbTrackerTheme.TEXT_DIM);
 			statsBlock.add(dash);
 		}
-		outer.add(statsBlock, BorderLayout.EAST);
+		if (expandable)
+		{
+			JPanel eastWrapper = new JPanel(new BorderLayout(6, 0));
+			eastWrapper.setBackground(PbTrackerTheme.PANEL);
+			eastWrapper.add(statsBlock, BorderLayout.WEST);
+			// A visible arrow, not just an unmarked clickable row - a hidden
+			// affordance here was the exact "where are my other team sizes?"
+			// problem from before; this time the row is obviously expandable.
+			JLabel chevron = new JLabel(expanded ? "v" : ">");
+			chevron.setForeground(PbTrackerTheme.GOLD_LIGHT);
+			chevron.setFont(FontManager.getRunescapeBoldFont());
+			eastWrapper.add(chevron, BorderLayout.EAST);
+			outer.add(eastWrapper, BorderLayout.EAST);
+		}
+		else
+		{
+			outer.add(statsBlock, BorderLayout.EAST);
+		}
 
 		outer.setAlignmentX(0);
 		outer.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
