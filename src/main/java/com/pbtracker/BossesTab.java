@@ -48,6 +48,7 @@ import java.util.function.Consumer;
 class BossesTab extends JPanel
 {
 	private static final String PLACEHOLDER = "Search bosses...";
+	static final int LEADERBOARD_LIMIT = 50;
 
 	private final SyncClient syncClient;
 	private final SpriteManager spriteManager;
@@ -533,7 +534,7 @@ class BossesTab extends JPanel
 
 		new Thread(() ->
 		{
-			List<SyncClient.LeaderboardRow> rows = syncClient.getLeaderboard(bossKey, 25, highlight);
+			List<SyncClient.LeaderboardRow> rows = syncClient.getLeaderboard(bossKey, LEADERBOARD_LIMIT, highlight);
 			SwingUtilities.invokeLater(() ->
 			{
 				if (requestGeneration == leaderboardRequestGeneration)

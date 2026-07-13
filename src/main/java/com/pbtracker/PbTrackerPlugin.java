@@ -470,7 +470,11 @@ public class PbTrackerPlugin extends Plugin
 			.setOption("Search PB")
 			.setTarget(entry.getTarget())
 			.setType(MenuAction.RUNELITE)
-			.onClick(e -> javax.swing.SwingUtilities.invokeLater(() -> sidePanel.lookupPlayer(playerName)));
+			.onClick(e -> javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				clientToolbar.openPanel(navButton);
+				sidePanel.lookupPlayer(playerName);
+			}));
 	}
 
 	@Subscribe
