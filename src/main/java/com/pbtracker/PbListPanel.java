@@ -321,15 +321,10 @@ class PbListPanel extends JPanel implements Scrollable
 			chevron.setForeground(PbTrackerTheme.TEXT_DIM);
 			chevron.setFont(FontManager.getRunescapeBoldFont());
 			row.add(chevron, BorderLayout.EAST);
-			row.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-			row.addMouseListener(new java.awt.event.MouseAdapter()
+			PbTrackerPlugin.addRowClickListener(row, () ->
 			{
-				@Override
-				public void mouseClicked(java.awt.event.MouseEvent e)
-				{
-					allBossesSectionExpanded = !allBossesSectionExpanded;
-					rerender();
-				}
+				allBossesSectionExpanded = !allBossesSectionExpanded;
+				rerender();
 			});
 		}
 
@@ -353,16 +348,16 @@ class PbListPanel extends JPanel implements Scrollable
 		boolean expandable = row.variants != null;
 		boolean expanded = expandable && expandedHeadings.contains(row.heading);
 
-		JPanel outer = new JPanel(new BorderLayout(6, 0));
+		JPanel outer = new JPanel(new BorderLayout(4, 0));
 		outer.setBackground(PbTrackerTheme.PANEL);
 		outer.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createMatteBorder(0, 0, 1, 0, PbTrackerTheme.PANEL_BORDER),
-			BorderFactory.createEmptyBorder(6, 6, 6, 6)
+			BorderFactory.createEmptyBorder(4, 4, 4, 4)
 		));
 		outer.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
 		JLabel icon = new JLabel();
-		icon.setPreferredSize(new Dimension(20, 20));
+		icon.setPreferredSize(new Dimension(16, 16));
 		icon.setHorizontalAlignment(SwingConstants.CENTER);
 		BossIcons.get(spriteManager, row.iconKey, icon::setIcon);
 		outer.add(icon, BorderLayout.WEST);
@@ -370,7 +365,11 @@ class PbListPanel extends JPanel implements Scrollable
 		JPanel textBlock = new JPanel();
 		textBlock.setLayout(new BoxLayout(textBlock, BoxLayout.Y_AXIS));
 		textBlock.setBackground(PbTrackerTheme.PANEL);
-		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.TEXT, true);
+		// Small, not bold - the real available width after the vertical
+		// scrollbar, panel padding, icon, and stats column is narrow enough
+		// that the bold font was still forcing 2-3 line wraps on ordinary
+		// names like "Theatre Of Blood".
+		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.TEXT, false);
 		textBlock.add(name);
 		if (row.subtitle != null)
 		{
@@ -417,27 +416,23 @@ class PbListPanel extends JPanel implements Scrollable
 
 		outer.setAlignmentX(0);
 		outer.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-		outer.addMouseListener(new java.awt.event.MouseAdapter()
+		PbTrackerPlugin.addRowClickListener(outer, () ->
 		{
-			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
+			if (expandable)
 			{
-				if (expandable)
+				if (expandedHeadings.contains(row.heading))
 				{
-					if (expandedHeadings.contains(row.heading))
-					{
-						expandedHeadings.remove(row.heading);
-					}
-					else
-					{
-						expandedHeadings.add(row.heading);
-					}
-					rerender();
+					expandedHeadings.remove(row.heading);
 				}
 				else
 				{
-					onBossClick.accept(row.clickKey, displayName);
+					expandedHeadings.add(row.heading);
 				}
+				rerender();
+			}
+			else
+			{
+				onBossClick.accept(row.clickKey, displayName);
 			}
 		});
 		rowsContainer.add(outer);
@@ -464,14 +459,7 @@ class PbListPanel extends JPanel implements Scrollable
 
 		JTextArea line = wrappedLabel(variant.label + "   " + PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank, PbTrackerTheme.TEXT_DIM, false);
 		row.add(line, BorderLayout.CENTER);
-		row.addMouseListener(new java.awt.event.MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
-			{
-				onBossClick.accept(variant.key, displayName);
-			}
-		});
+		PbTrackerPlugin.addRowClickListener(row, () -> onBossClick.accept(variant.key, displayName));
 		rowsContainer.add(row);
 	}
 

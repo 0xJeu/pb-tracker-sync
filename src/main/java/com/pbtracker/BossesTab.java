@@ -579,14 +579,7 @@ class BossesTab extends JPanel
 		));
 		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
 
-		panel.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				onPlayerClick.accept(row.displayName);
-			}
-		});
+		PbTrackerPlugin.addRowClickListener(panel, () -> onPlayerClick.accept(row.displayName));
 		return panel;
 	}
 

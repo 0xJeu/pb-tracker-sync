@@ -656,6 +656,35 @@ public class PbTrackerPlugin extends Plugin
 		return text.replace("-", "- ");
 	}
 
+	/**
+	 * Swing delivers a mouse click to whichever component is directly under
+	 * the cursor, not to its ancestors - there's no automatic bubbling like
+	 * in a browser DOM. A listener attached only to a row's outer container
+	 * therefore only fires when a click lands on a sliver of uncovered
+	 * background; since icon/text/label children typically fill nearly the
+	 * whole row, most clicks on a "clickable row" were silently doing
+	 * nothing. Attaching the same listener to every descendant fixes that.
+	 */
+	static void addRowClickListener(java.awt.Component component, Runnable onClick)
+	{
+		component.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		component.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				onClick.run();
+			}
+		});
+		if (component instanceof java.awt.Container)
+		{
+			for (java.awt.Component child : ((java.awt.Container) component).getComponents())
+			{
+				addRowClickListener(child, onClick);
+			}
+		}
+	}
+
 	// Explicit mode keyword -> the exact mode text OVERALL_LABEL_PATTERN
 	// captures for it, for the "<boss> <mode> [size]" form (e.g. "tob entry
 	// 2", "cox challenge 3"). Separate from MODE_SPECIFIC_ALIASES, which is
