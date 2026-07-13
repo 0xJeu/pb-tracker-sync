@@ -223,7 +223,7 @@ class PbListPanel extends JPanel implements Scrollable
 	 */
 	private JTextArea buildHeadingLabel(String text)
 	{
-		JTextArea heading = new JTextArea(text);
+		JTextArea heading = new JTextArea(PbTrackerPlugin.wrapFriendly(text));
 		heading.setEditable(false);
 		heading.setFocusable(false);
 		heading.setLineWrap(true);
@@ -257,11 +257,11 @@ class PbListPanel extends JPanel implements Scrollable
 		return line;
 	}
 
-	/** A 26x26 boss icon (loaded asynchronously), or a blank label of the same width if none exists - keeps rows aligned either way. */
+	/** A 20x20 boss icon (loaded asynchronously), or a blank label of the same width if none exists - keeps rows aligned either way. */
 	private JLabel buildIconLabel(String bossKey)
 	{
 		JLabel label = new JLabel();
-		label.setPreferredSize(new Dimension(26, 26));
+		label.setPreferredSize(new Dimension(20, 20));
 		label.setHorizontalAlignment(SwingConstants.CENTER);
 		BossIcons.get(spriteManager, bossKey, label::setIcon);
 		return label;
@@ -291,11 +291,11 @@ class PbListPanel extends JPanel implements Scrollable
 		content.setBackground(PbTrackerTheme.PANEL);
 		content.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
-		JPanel outer = new JPanel(new BorderLayout(8, 0));
+		JPanel outer = new JPanel(new BorderLayout(6, 0));
 		outer.setBackground(PbTrackerTheme.PANEL);
 		outer.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createMatteBorder(0, 0, 1, 0, PbTrackerTheme.PANEL_BORDER),
-			BorderFactory.createEmptyBorder(8, 10, 8, 10)
+			BorderFactory.createEmptyBorder(6, 6, 6, 6)
 		));
 		outer.add(buildIconLabel(bossKey), BorderLayout.WEST);
 		outer.add(content, BorderLayout.CENTER);

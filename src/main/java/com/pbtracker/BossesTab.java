@@ -468,7 +468,7 @@ class BossesTab extends JPanel
 
 	private void loadLeaderboard(String bossKey, String title)
 	{
-		leaderboardTitle.setText(title);
+		leaderboardTitle.setText(PbTrackerPlugin.wrapFriendly(title));
 		leaderboardRows.removeAll();
 		JLabel loading = new JLabel("Loading...");
 		loading.setForeground(PbTrackerTheme.TEXT_DIM);

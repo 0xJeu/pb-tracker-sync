@@ -643,6 +643,19 @@ public class PbTrackerPlugin extends Plugin
 		return result.toString();
 	}
 
+	/**
+	 * JTextArea's word-wrap only breaks at whitespace, not at hyphens - a
+	 * long hyphenated compound like "Tzhaar-Ket-Rak's" has no spaces at all
+	 * in its first 16 characters, so on the sidebar's narrow width it
+	 * doesn't fit on one line and gets forced into an ugly mid-syllable
+	 * character break ("Tzhaar-ke" / "t-rak's") instead. Inserting a space
+	 * after each hyphen gives the wrapper a natural place to break instead.
+	 */
+	static String wrapFriendly(String text)
+	{
+		return text.replace("-", "- ");
+	}
+
 	// Explicit mode keyword -> the exact mode text OVERALL_LABEL_PATTERN
 	// captures for it, for the "<boss> <mode> [size]" form (e.g. "tob entry
 	// 2", "cox challenge 3"). Separate from MODE_SPECIFIC_ALIASES, which is
