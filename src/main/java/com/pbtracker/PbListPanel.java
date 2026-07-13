@@ -367,7 +367,10 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		else
 		{
-			JLabel dash = new JLabel("–");
+			// Plain ASCII "-" rather than an en dash - RuneLite's bitmap OSRS
+			// font doesn't have a glyph for "–" and silently falls back to a
+			// "tofu" box character instead (same issue as the old chevron).
+			JLabel dash = new JLabel("-");
 			dash.setForeground(PbTrackerTheme.TEXT_DIM);
 			dash.setFont(FontManager.getRunescapeBoldFont());
 			statsBlock.add(dash);
