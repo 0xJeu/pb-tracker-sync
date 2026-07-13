@@ -17,6 +17,8 @@ class MyPbsTab extends JPanel
 	private final SyncClient syncClient;
 	private final BiConsumer<String, String> onBossClickHandler;
 	private final PbListPanel listPanel = new PbListPanel();
+	private final JScrollPane scrollPane;
+	private long requestGeneration;
 
 	MyPbsTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
 	{
@@ -25,7 +27,7 @@ class MyPbsTab extends JPanel
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
-		JScrollPane scrollPane = new JScrollPane(listPanel);
+		scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
 		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
@@ -38,15 +40,21 @@ class MyPbsTab extends JPanel
 	void load(String displayName)
 	{
 		listPanel.showMessage("Loading...");
+		long request = ++requestGeneration;
 		new Thread(() ->
 		{
 			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(displayName);
 			SwingUtilities.invokeLater(() ->
 			{
+				if (request != requestGeneration)
+				{
+					return;
+				}
 				switch (result.kind)
 				{
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
+						scrollToTop();
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found yet - sync with the plugin first.");
@@ -63,8 +71,14 @@ class MyPbsTab extends JPanel
 		}, "pbtracker-mypbs-lookup").start();
 	}
 
+	private void scrollToTop()
+	{
+		SwingUtilities.invokeLater(() -> scrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0)));
+	}
+
 	void showLoggedOut()
 	{
+		requestGeneration++;
 		listPanel.showMessage("Log in to see your PBs.");
 	}
 }

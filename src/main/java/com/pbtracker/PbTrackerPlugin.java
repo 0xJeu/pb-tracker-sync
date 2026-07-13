@@ -261,6 +261,10 @@ public class PbTrackerPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 
 		refreshBossList();
+		if (client.getGameState() == GameState.LOGGED_IN)
+		{
+			onLoggedIn();
+		}
 	}
 
 	/**
@@ -341,32 +345,30 @@ public class PbTrackerPlugin extends Plugin
 	{
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			accountHash = String.valueOf(client.getAccountHash());
-
-			if (config.syncOnLogin())
-			{
-				// give the client a few seconds to settle before bulk syncing
-				executor.schedule(this::syncAll, 5, TimeUnit.SECONDS);
-			}
-
-			if (sidePanel != null)
-			{
-				// Same reasoning as the bulk-sync delay above - the local
-				// player isn't populated yet at the instant this fires.
-				// sidePanel's own Swing components must only be touched on
-				// the EDT, which the ScheduledExecutorService isn't.
-				executor.schedule(() -> javax.swing.SwingUtilities.invokeLater(() ->
-				{
-					if (client.getLocalPlayer() != null)
-					{
-						sidePanel.onLocalPlayerChanged(client.getLocalPlayer().getName());
-					}
-				}), 5, TimeUnit.SECONDS);
-			}
+			onLoggedIn();
 		}
 		else if (event.getGameState() == GameState.LOGIN_SCREEN && sidePanel != null)
 		{
 			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
+		}
+	}
+
+	private void onLoggedIn()
+	{
+		accountHash = String.valueOf(client.getAccountHash());
+		if (config.syncOnLogin())
+		{
+			executor.schedule(this::syncAll, 5, TimeUnit.SECONDS);
+		}
+		if (sidePanel != null)
+		{
+			executor.schedule(() -> javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (client.getGameState() == GameState.LOGGED_IN && client.getLocalPlayer() != null)
+				{
+					sidePanel.onLocalPlayerChanged(client.getLocalPlayer().getName());
+				}
+			}), 5, TimeUnit.SECONDS);
 		}
 	}
 
@@ -430,7 +432,7 @@ public class PbTrackerPlugin extends Plugin
 			.setOption("Search PB")
 			.setTarget(entry.getTarget())
 			.setType(MenuAction.RUNELITE)
-			.onClick(e -> sidePanel.lookupPlayer(playerName));
+			.onClick(e -> javax.swing.SwingUtilities.invokeLater(() -> sidePanel.lookupPlayer(playerName)));
 	}
 
 	@Subscribe

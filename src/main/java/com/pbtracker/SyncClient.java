@@ -15,6 +15,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Thin wrapper around RuneLite's shared OkHttpClient that talks to the PB
@@ -100,6 +101,12 @@ class SyncClient
 			{
 				return PlayerLookupResult.ambiguous();
 			}
+			if (parsed.pbs != null)
+			{
+				parsed.pbs = parsed.pbs.stream()
+					.filter(pb -> TrackedBosses.isTracked(pb.boss))
+					.collect(Collectors.toList());
+			}
 
 			return PlayerLookupResult.found(parsed);
 		}
@@ -128,7 +135,13 @@ class SyncClient
 				return java.util.Collections.emptyList();
 			}
 			String[] bosses = gson.fromJson(body, String[].class);
-			return bosses == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(bosses);
+			if (bosses == null)
+			{
+				return java.util.Collections.emptyList();
+			}
+			return java.util.Arrays.stream(bosses)
+				.filter(TrackedBosses::isTracked)
+				.collect(Collectors.toList());
 		}
 		catch (IOException | RuntimeException e)
 		{
@@ -137,11 +150,10 @@ class SyncClient
 	}
 
 	/** Blocking GET of a boss's leaderboard - for the side panel's Bosses tab. Returns null on failure. */
-	List<LeaderboardRow> getLeaderboard(String boss, int limit)
+	List<LeaderboardRow> getLeaderboard(String boss, int limit, String highlight)
 	{
 		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
-		String encodedBoss = URLEncoder.encode(boss, StandardCharsets.UTF_8).replace("+", "%20");
-		Request request = new Request.Builder().url(base + "/api/leaderboard/" + encodedBoss + "?limit=" + limit).get().build();
+		Request request = new Request.Builder().url(buildLeaderboardUrl(base, boss, limit, highlight)).get().build();
 
 		try (Response response = httpClient.newCall(request).execute())
 		{
@@ -162,6 +174,23 @@ class SyncClient
 		{
 			return null;
 		}
+	}
+
+	static String buildLeaderboardUrl(String base, String boss, int limit, String highlight)
+	{
+		String normalizedBase = base == null ? "" : base.replaceAll("/+$", "");
+		String encodedBoss = URLEncoder.encode(boss, StandardCharsets.UTF_8).replace("+", "%20");
+		StringBuilder url = new StringBuilder(normalizedBase)
+			.append("/api/leaderboard/")
+			.append(encodedBoss)
+			.append("?limit=")
+			.append(limit);
+		if (highlight != null && !highlight.trim().isEmpty())
+		{
+			url.append("&highlight=")
+				.append(URLEncoder.encode(highlight, StandardCharsets.UTF_8).replace("+", "%20"));
+		}
+		return url.toString();
 	}
 
 	static class LeaderboardRow

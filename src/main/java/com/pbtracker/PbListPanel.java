@@ -11,7 +11,11 @@ import javax.swing.JTextArea;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.Rectangle;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -40,7 +44,7 @@ class PbListPanel extends JPanel implements Scrollable
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
-		rowsContainer.setLayout(new BoxLayout(rowsContainer, BoxLayout.Y_AXIS));
+		rowsContainer.setLayout(new GridBagLayout());
 		rowsContainer.setBackground(PbTrackerTheme.BG);
 		add(rowsContainer, BorderLayout.NORTH);
 	}
@@ -78,13 +82,22 @@ class PbListPanel extends JPanel implements Scrollable
 	void showMessage(String text)
 	{
 		rowsContainer.removeAll();
-		JLabel label = new JLabel("<html><center>" + text + "</center></html>");
+		JLabel label = new JLabel("<html><center>" + escapeHtml(text) + "</center></html>");
 		label.setForeground(PbTrackerTheme.TEXT_DIM);
 		label.setHorizontalAlignment(SwingConstants.CENTER);
 		label.setBorder(BorderFactory.createEmptyBorder(16, 8, 16, 8));
-		rowsContainer.add(label);
+		addFullWidthRow(label);
 		revalidate();
 		repaint();
+	}
+
+	static String escapeHtml(String text)
+	{
+		return text.replace("&", "&amp;")
+			.replace("<", "&lt;")
+			.replace(">", "&gt;")
+			.replace("\"", "&quot;")
+			.replace("'", "&#39;");
 	}
 
 	/**
@@ -142,7 +155,7 @@ class PbListPanel extends JPanel implements Scrollable
 		label.setForeground(PbTrackerTheme.GOLD);
 		label.setFont(FontManager.getRunescapeBoldFont());
 		label.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		rowsContainer.add(label);
+		addFullWidthRow(label);
 	}
 
 	/**
@@ -159,7 +172,7 @@ class PbListPanel extends JPanel implements Scrollable
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(timeText, group.summary.rank));
 		makeClickable(row.content, () -> onBossClick.accept(group.summary.key, displayName));
-		rowsContainer.add(row.outer);
+		addFullWidthRow(row.outer);
 
 		for (BossGroups.PlayerRaidVariant variant : group.variants)
 		{
@@ -190,15 +203,8 @@ class PbListPanel extends JPanel implements Scrollable
 		line.setForeground(PbTrackerTheme.TEXT_DIM);
 
 		row.add(line, BorderLayout.CENTER);
-		row.addMouseListener(new java.awt.event.MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
-			{
-				onBossClick.accept(variant.key, displayName);
-			}
-		});
-		rowsContainer.add(row);
+		makeClickable(row, () -> onBossClick.accept(variant.key, displayName));
+		addFullWidthRow(row);
 	}
 
 	private void addFlatRow(BossGroups.PlayerPb pb, String displayName, BiConsumer<String, String> onBossClick)
@@ -208,7 +214,23 @@ class PbListPanel extends JPanel implements Scrollable
 		row.content.add(Box.createVerticalStrut(4));
 		row.content.add(buildDetailLine(PbTrackerPlugin.formatTime(pb.timeSeconds), pb.rank));
 		makeClickable(row.content, () -> onBossClick.accept(pb.boss, displayName));
-		rowsContainer.add(row.outer);
+		addFullWidthRow(row.outer);
+	}
+
+	/**
+	 * GridBagLayout with horizontal fill avoids BoxLayout shrinking each card
+	 * to its preferred text width, which left a large blank gutter beside
+	 * shorter boss names in RuneLite's narrow sidebar.
+	 */
+	private void addFullWidthRow(Component component)
+	{
+		GridBagConstraints constraints = new GridBagConstraints();
+		constraints.gridx = 0;
+		constraints.gridy = rowsContainer.getComponentCount();
+		constraints.weightx = 1.0;
+		constraints.fill = GridBagConstraints.HORIZONTAL;
+		constraints.anchor = GridBagConstraints.FIRST_LINE_START;
+		rowsContainer.add(component, constraints);
 	}
 
 	/**
@@ -293,9 +315,10 @@ class PbListPanel extends JPanel implements Scrollable
 		return new RowParts(outer, content);
 	}
 
-	private void makeClickable(JPanel row, Runnable onClick)
+	private void makeClickable(Component component, Runnable onClick)
 	{
-		row.addMouseListener(new java.awt.event.MouseAdapter()
+		component.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		component.addMouseListener(new java.awt.event.MouseAdapter()
 		{
 			@Override
 			public void mouseClicked(java.awt.event.MouseEvent e)
@@ -303,5 +326,12 @@ class PbListPanel extends JPanel implements Scrollable
 				onClick.run();
 			}
 		});
+		if (component instanceof Container)
+		{
+			for (Component child : ((Container) component).getComponents())
+			{
+				makeClickable(child, onClick);
+			}
+		}
 	}
 }

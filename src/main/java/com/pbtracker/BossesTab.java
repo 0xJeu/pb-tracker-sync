@@ -61,6 +61,7 @@ class BossesTab extends JPanel
 
 	private List<String> allBosses = List.of();
 	private String pendingHighlight;
+	private long leaderboardRequestGeneration;
 
 	private static final class PickerEntry
 	{
@@ -443,11 +444,18 @@ class BossesTab extends JPanel
 
 		String highlight = pendingHighlight;
 		pendingHighlight = null;
+		long requestGeneration = ++leaderboardRequestGeneration;
 
 		new Thread(() ->
 		{
-			List<SyncClient.LeaderboardRow> rows = syncClient.getLeaderboard(bossKey, highlight != null ? 500 : 25);
-			SwingUtilities.invokeLater(() -> renderLeaderboard(rows, highlight));
+			List<SyncClient.LeaderboardRow> rows = syncClient.getLeaderboard(bossKey, 25, highlight);
+			SwingUtilities.invokeLater(() ->
+			{
+				if (requestGeneration == leaderboardRequestGeneration)
+				{
+					renderLeaderboard(rows, highlight);
+				}
+			});
 		}, "pbtracker-leaderboard-lookup").start();
 	}
 
@@ -525,15 +533,28 @@ class BossesTab extends JPanel
 		));
 		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
 
-		panel.addMouseListener(new MouseAdapter()
+		makeClickable(panel, () -> onPlayerClick.accept(row.displayName));
+		return panel;
+	}
+
+	private static void makeClickable(Component component, Runnable onClick)
+	{
+		component.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		component.addMouseListener(new MouseAdapter()
 		{
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				onPlayerClick.accept(row.displayName);
+				onClick.run();
 			}
 		});
-		return panel;
+		if (component instanceof java.awt.Container)
+		{
+			for (Component child : ((java.awt.Container) component).getComponents())
+			{
+				makeClickable(child, onClick);
+			}
+		}
 	}
 
 	/** Called from the "jump to leaderboard, scrolled to this player" flow (rank click on a PB row). */

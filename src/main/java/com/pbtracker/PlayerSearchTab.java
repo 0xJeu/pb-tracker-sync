@@ -23,6 +23,8 @@ class PlayerSearchTab extends JPanel
 	private final BiConsumer<String, String> onBossClickHandler;
 	private final PbListPanel listPanel = new PbListPanel();
 	private final JTextField searchField = new JTextField();
+	private final JScrollPane scrollPane;
+	private long requestGeneration;
 
 	PlayerSearchTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
 	{
@@ -48,7 +50,7 @@ class PlayerSearchTab extends JPanel
 
 		add(searchBar, BorderLayout.NORTH);
 
-		JScrollPane scrollPane = new JScrollPane(listPanel);
+		scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
 		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
@@ -72,15 +74,21 @@ class PlayerSearchTab extends JPanel
 	{
 		searchField.setText(name);
 		listPanel.showMessage("Loading...");
+		long request = ++requestGeneration;
 		new Thread(() ->
 		{
 			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(name);
 			SwingUtilities.invokeLater(() ->
 			{
+				if (request != requestGeneration)
+				{
+					return;
+				}
 				switch (result.kind)
 				{
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
+						scrollToTop();
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found for \"" + name + "\" yet.");
@@ -95,5 +103,10 @@ class PlayerSearchTab extends JPanel
 				}
 			});
 		}, "pbtracker-search-lookup").start();
+	}
+
+	private void scrollToTop()
+	{
+		SwingUtilities.invokeLater(() -> scrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0)));
 	}
 }
