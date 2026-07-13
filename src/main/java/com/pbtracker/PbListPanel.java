@@ -340,7 +340,7 @@ class PbListPanel extends JPanel implements Scrollable
 		// Bold at the normal (not "small") size - readability won out over
 		// avoiding wraps, so a long name like "Theatre Of Blood" may now
 		// take 2 lines rather than fitting on 1.
-		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.TEXT, true);
+		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.GOLD, true);
 		textBlock.add(name);
 		if (row.subtitle != null)
 		{

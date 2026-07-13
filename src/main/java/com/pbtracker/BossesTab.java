@@ -427,7 +427,7 @@ class BossesTab extends JPanel
 
 		JComboBox<BossGroups.KeyLabel> sizeCombo = new JComboBox<>(mode.variants.toArray(new BossGroups.KeyLabel[0]));
 		sizeCombo.setBackground(PbTrackerTheme.PANEL);
-		sizeCombo.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		sizeCombo.setForeground(PbTrackerTheme.TEXT);
 		java.awt.Font comboFont = FontManager.getRunescapeFont();
 		sizeCombo.setFont(comboFont.deriveFont(comboFont.getSize2D() + 2f));
 		sizeCombo.setBorder(BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER));
@@ -443,7 +443,7 @@ class BossesTab extends JPanel
 			{
 				JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 				label.setBackground(isSelected ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
-				label.setForeground(isSelected ? PbTrackerTheme.GOLD : PbTrackerTheme.GOLD_LIGHT);
+				label.setForeground(isSelected ? PbTrackerTheme.GOLD_LIGHT : PbTrackerTheme.TEXT);
 				label.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
 				return label;
 			}
