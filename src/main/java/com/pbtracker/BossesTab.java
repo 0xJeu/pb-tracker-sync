@@ -489,6 +489,7 @@ class BossesTab extends JPanel
 	private void renderLeaderboard(List<SyncClient.LeaderboardRow> rows, String highlight)
 	{
 		leaderboardRows.removeAll();
+		JPanel highlightedRow = null;
 		if (rows == null)
 		{
 			JLabel error = new JLabel("Lookup failed - try again later.");
@@ -507,11 +508,29 @@ class BossesTab extends JPanel
 			{
 				SyncClient.LeaderboardRow row = rows.get(i);
 				boolean isHighlighted = highlight != null && row.displayName.equalsIgnoreCase(highlight);
-				leaderboardRows.add(buildLeaderboardRow(i + 1, row, isHighlighted));
+				JPanel rowPanel = buildLeaderboardRow(i + 1, row, isHighlighted);
+				leaderboardRows.add(rowPanel);
+				if (isHighlighted)
+				{
+					highlightedRow = rowPanel;
+				}
 			}
 		}
 		leaderboardRows.revalidate();
 		leaderboardRows.repaint();
+
+		// Jumping here from a PB row is pointless if the player's own rank
+		// isn't actually visible without manually scrolling - bring it into
+		// view automatically. Deferred one tick so the rows above it have
+		// already been laid out and their heights are known.
+		if (highlightedRow != null)
+		{
+			JPanel target = highlightedRow;
+			// scrollRectToVisible wants a rect in the component's OWN
+			// coordinate space (0,0 to its own size), not its bounds
+			// relative to its parent.
+			SwingUtilities.invokeLater(() -> target.scrollRectToVisible(new java.awt.Rectangle(0, 0, target.getWidth(), target.getHeight())));
+		}
 	}
 
 	// Gold/silver/bronze for the top 3, matching a medal-podium convention -

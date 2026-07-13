@@ -402,22 +402,18 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		if (expandable)
 		{
-			JPanel eastWrapper = new JPanel(new BorderLayout(6, 0));
-			eastWrapper.setBackground(PbTrackerTheme.PANEL);
-			eastWrapper.add(statsBlock, BorderLayout.WEST);
 			// A visible arrow, not just an unmarked clickable row - a hidden
 			// affordance here was the exact "where are my other team sizes?"
-			// problem from before; this time the row is obviously expandable.
+			// problem from before. Stacked below the rank rather than beside
+			// it, so an expandable row costs no extra horizontal width and
+			// doesn't force the name text to wrap any harder than a plain row.
 			JLabel chevron = new JLabel(expanded ? "v" : ">");
 			chevron.setForeground(PbTrackerTheme.GOLD_LIGHT);
 			chevron.setFont(FontManager.getRunescapeBoldFont());
-			eastWrapper.add(chevron, BorderLayout.EAST);
-			outer.add(eastWrapper, BorderLayout.EAST);
+			chevron.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
+			statsBlock.add(chevron);
 		}
-		else
-		{
-			outer.add(statsBlock, BorderLayout.EAST);
-		}
+		outer.add(statsBlock, BorderLayout.EAST);
 
 		outer.setAlignmentX(0);
 		outer.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
