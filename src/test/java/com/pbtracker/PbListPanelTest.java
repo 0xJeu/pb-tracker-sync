@@ -26,7 +26,7 @@ public class PbListPanelTest
 		AtomicBoolean clicked = new AtomicBoolean();
 		SwingUtilities.invokeAndWait(() ->
 		{
-			PbListPanel panel = new PbListPanel();
+			PbListPanel panel = new PbListPanel(null);
 			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
 			player.displayName = "Tester";
 			SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
@@ -41,6 +41,27 @@ public class PbListPanelTest
 				System.currentTimeMillis(), 0, 2, 2, 1, false));
 		});
 		assertTrue(clicked.get());
+	}
+
+	@Test
+	public void lateBossListRerendersAnAlreadyLoadedPlayer() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			PbListPanel panel = new PbListPanel(null);
+			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
+			player.displayName = "Tester";
+			SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
+			pb.boss = "zulrah";
+			pb.timeSeconds = 60;
+			pb.rank = 1;
+			player.pbs = Collections.singletonList(pb);
+
+			panel.showPlayer(player, (boss, name) -> { });
+			panel.setAllBosses(java.util.List.of("zulrah", "vorkath"));
+
+			assertTrue(findTextAreaOrNull(panel, "Vorkath") != null);
+		});
 	}
 
 	private static JTextArea findTextArea(Container root, String text)
