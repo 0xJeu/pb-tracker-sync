@@ -1,0 +1,112 @@
+package com.pbtracker;
+
+
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextField;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.event.ActionListener;
+import java.util.function.BiConsumer;
+
+/**
+ * "Player Search" tab - a name box + the same PbListPanel rendering used by
+ * MyPbsTab, so results look identical whether you're looking at your own
+ * data or someone else's.
+ */
+class PlayerSearchTab extends JPanel
+{
+	private final SyncClient syncClient;
+	private final BiConsumer<String, String> onBossClickHandler;
+	private final PbListPanel listPanel = new PbListPanel();
+	private final JTextField searchField = new JTextField();
+	private final JScrollPane scrollPane;
+	private long requestGeneration;
+
+	PlayerSearchTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
+	{
+		this.syncClient = syncClient;
+		this.onBossClickHandler = onBossClick;
+		setLayout(new BorderLayout());
+		setBackground(PbTrackerTheme.BG);
+
+		JPanel searchBar = new JPanel(new BorderLayout(6, 0));
+		searchBar.setBackground(PbTrackerTheme.BG);
+		searchBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+		searchField.setBackground(PbTrackerTheme.PANEL);
+		searchField.setForeground(PbTrackerTheme.TEXT);
+		ActionListener search = e -> doSearch();
+		searchField.addActionListener(search);
+
+		JButton searchButton = new JButton("Search");
+		searchButton.addActionListener(search);
+
+		searchBar.add(searchField, BorderLayout.CENTER);
+		searchBar.add(searchButton, BorderLayout.EAST);
+
+		add(searchBar, BorderLayout.NORTH);
+
+		scrollPane = new JScrollPane(listPanel);
+		scrollPane.setBorder(null);
+		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+		add(scrollPane, BorderLayout.CENTER);
+
+		listPanel.showMessage("Search a player to see their synced PBs.");
+	}
+
+	private void doSearch()
+	{
+		String name = searchField.getText().trim();
+		if (name.isEmpty())
+		{
+			return;
+		}
+		searchFor(name);
+	}
+
+	/** Also used by the right-click "Search PB" menu option, which switches to this tab and searches directly. */
+	void searchFor(String name)
+	{
+		searchField.setText(name);
+		listPanel.showMessage("Loading...");
+		long request = ++requestGeneration;
+		new Thread(() ->
+		{
+			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(name);
+			SwingUtilities.invokeLater(() ->
+			{
+				if (request != requestGeneration)
+				{
+					return;
+				}
+				switch (result.kind)
+				{
+					case FOUND:
+						listPanel.showPlayer(result.player, onBossClickHandler);
+						scrollToTop();
+						break;
+					case NOT_FOUND:
+						listPanel.showMessage("No synced PB data found for \"" + name + "\" yet.");
+						break;
+					case AMBIGUOUS:
+						listPanel.showMessage("Multiple synced accounts share this name - check the website directly.");
+						break;
+					case ERROR:
+					default:
+						listPanel.showMessage("Lookup failed - try again later.");
+						break;
+				}
+			});
+		}, "pbtracker-search-lookup").start();
+	}
+
+	private void scrollToTop()
+	{
+		SwingUtilities.invokeLater(() -> scrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0)));
+	}
+}

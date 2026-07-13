@@ -15,6 +15,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Thin wrapper around RuneLite's shared OkHttpClient that talks to the PB
@@ -100,6 +101,12 @@ class SyncClient
 			{
 				return PlayerLookupResult.ambiguous();
 			}
+			if (parsed.pbs != null)
+			{
+				parsed.pbs = parsed.pbs.stream()
+					.filter(pb -> TrackedBosses.isTracked(pb.boss))
+					.collect(Collectors.toList());
+			}
 
 			return PlayerLookupResult.found(parsed);
 		}
@@ -107,6 +114,90 @@ class SyncClient
 		{
 			return PlayerLookupResult.error();
 		}
+	}
+
+	/** Blocking GET of every tracked boss key - for the side panel's boss picker. Returns an empty list on any failure. */
+	List<String> getBosses()
+	{
+		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		Request request = new Request.Builder().url(base + "/api/bosses").get().build();
+
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (!response.isSuccessful())
+			{
+				return java.util.Collections.emptyList();
+			}
+			ResponseBody responseBody = response.body();
+			String body = responseBody == null ? null : responseBody.string();
+			if (body == null)
+			{
+				return java.util.Collections.emptyList();
+			}
+			String[] bosses = gson.fromJson(body, String[].class);
+			if (bosses == null)
+			{
+				return java.util.Collections.emptyList();
+			}
+			return java.util.Arrays.stream(bosses)
+				.filter(TrackedBosses::isTracked)
+				.collect(Collectors.toList());
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return java.util.Collections.emptyList();
+		}
+	}
+
+	/** Blocking GET of a boss's leaderboard - for the side panel's Bosses tab. Returns null on failure. */
+	List<LeaderboardRow> getLeaderboard(String boss, int limit, String highlight)
+	{
+		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		Request request = new Request.Builder().url(buildLeaderboardUrl(base, boss, limit, highlight)).get().build();
+
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (!response.isSuccessful())
+			{
+				return null;
+			}
+			ResponseBody responseBody = response.body();
+			String body = responseBody == null ? null : responseBody.string();
+			if (body == null)
+			{
+				return null;
+			}
+			LeaderboardRow[] rows = gson.fromJson(body, LeaderboardRow[].class);
+			return rows == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(rows);
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	static String buildLeaderboardUrl(String base, String boss, int limit, String highlight)
+	{
+		String normalizedBase = base == null ? "" : base.replaceAll("/+$", "");
+		String encodedBoss = URLEncoder.encode(boss, StandardCharsets.UTF_8).replace("+", "%20");
+		StringBuilder url = new StringBuilder(normalizedBase)
+			.append("/api/leaderboard/")
+			.append(encodedBoss)
+			.append("?limit=")
+			.append(limit);
+		if (highlight != null && !highlight.trim().isEmpty())
+		{
+			url.append("&highlight=")
+				.append(URLEncoder.encode(highlight, StandardCharsets.UTF_8).replace("+", "%20"));
+		}
+		return url.toString();
+	}
+
+	static class LeaderboardRow
+	{
+		String displayName;
+		double timeSeconds;
+		String updatedAt;
 	}
 
 	private static class SyncPayload
