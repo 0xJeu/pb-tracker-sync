@@ -287,12 +287,12 @@ class PbListPanel extends JPanel implements Scrollable
 
 		JLabel label = new JLabel(text);
 		label.setForeground(PbTrackerTheme.TEXT);
-		label.setFont(FontManager.getRunescapeBoldFont());
+		label.setFont(FontManager.getRunescapeBoldFont().deriveFont(FontManager.getRunescapeBoldFont().getSize2D() + 2f));
 		row.add(label, BorderLayout.WEST);
 
 		JLabel chevron = new JLabel(expanded ? "v" : ">");
 		chevron.setForeground(PbTrackerTheme.TEXT_DIM);
-		chevron.setFont(FontManager.getRunescapeBoldFont());
+		chevron.setFont(label.getFont());
 		row.add(chevron, BorderLayout.EAST);
 		PbTrackerPlugin.addRowClickListener(row, () ->
 		{
@@ -320,16 +320,16 @@ class PbListPanel extends JPanel implements Scrollable
 		boolean expandable = row.variants != null;
 		boolean expanded = expandable && expandedHeadings.contains(row.heading);
 
-		JPanel outer = new JPanel(new BorderLayout(4, 0));
+		JPanel outer = new JPanel(new BorderLayout(8, 0));
 		outer.setBackground(PbTrackerTheme.PANEL);
 		outer.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createMatteBorder(0, 0, 1, 0, PbTrackerTheme.PANEL_BORDER),
-			BorderFactory.createEmptyBorder(4, 4, 4, 4)
+			BorderFactory.createEmptyBorder(8, 8, 8, 8)
 		));
 		outer.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
 		JLabel icon = new JLabel();
-		icon.setPreferredSize(new Dimension(16, 16));
+		icon.setPreferredSize(new Dimension(28, 28));
 		icon.setHorizontalAlignment(SwingConstants.CENTER);
 		BossIcons.get(spriteManager, row.iconKey, icon::setIcon);
 		outer.add(icon, BorderLayout.WEST);
@@ -337,11 +337,10 @@ class PbListPanel extends JPanel implements Scrollable
 		JPanel textBlock = new JPanel();
 		textBlock.setLayout(new BoxLayout(textBlock, BoxLayout.Y_AXIS));
 		textBlock.setBackground(PbTrackerTheme.PANEL);
-		// Small, not bold - the real available width after the vertical
-		// scrollbar, panel padding, icon, and stats column is narrow enough
-		// that the bold font was still forcing 2-3 line wraps on ordinary
-		// names like "Theatre Of Blood".
-		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.TEXT, false);
+		// Bold at the normal (not "small") size - readability won out over
+		// avoiding wraps, so a long name like "Theatre Of Blood" may now
+		// take 2 lines rather than fitting on 1.
+		JTextArea name = wrappedLabel(PbTrackerPlugin.wrapFriendly(row.primaryName), PbTrackerTheme.TEXT, true);
 		textBlock.add(name);
 		if (row.subtitle != null)
 		{
@@ -361,6 +360,7 @@ class PbListPanel extends JPanel implements Scrollable
 			time.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
 			JLabel rank = new JLabel("#" + row.rank);
 			rank.setForeground(PbTrackerTheme.TEXT_DIM);
+			rank.setFont(FontManager.getRunescapeFont());
 			rank.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
 			statsBlock.add(time);
 			statsBlock.add(rank);
@@ -369,6 +369,7 @@ class PbListPanel extends JPanel implements Scrollable
 		{
 			JLabel dash = new JLabel("–");
 			dash.setForeground(PbTrackerTheme.TEXT_DIM);
+			dash.setFont(FontManager.getRunescapeBoldFont());
 			statsBlock.add(dash);
 		}
 		if (expandable)
@@ -457,7 +458,7 @@ class PbListPanel extends JPanel implements Scrollable
 		area.setWrapStyleWord(true);
 		area.setOpaque(false);
 		area.setForeground(color);
-		area.setFont(bold ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeSmallFont());
+		area.setFont(bold ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeFont());
 		area.setBorder(null);
 		area.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
 		return area;

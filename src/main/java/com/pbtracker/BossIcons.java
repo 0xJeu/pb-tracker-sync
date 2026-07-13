@@ -29,7 +29,7 @@ final class BossIcons
 	{
 	}
 
-	private static final int SIZE = 16;
+	private static final int SIZE = 28;
 	private static final Map<Integer, ImageIcon> CACHE = new ConcurrentHashMap<>();
 	private static final Map<String, Integer> SPRITE_IDS = buildSpriteIds();
 

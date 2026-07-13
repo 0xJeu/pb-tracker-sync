@@ -188,7 +188,7 @@ class BossesTab extends JPanel
 		pickerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		pickerList.setSelectionBackground(PbTrackerTheme.HIGHLIGHT_BG);
 		pickerList.setSelectionForeground(PbTrackerTheme.GOLD_LIGHT);
-		pickerList.setFixedCellHeight(26);
+		pickerList.setFixedCellHeight(36);
 		pickerList.setCellRenderer(new PickerEntryRenderer());
 		pickerList.addListSelectionListener(e ->
 		{
@@ -250,7 +250,8 @@ class BossesTab extends JPanel
 		selectedBossBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
 		selectedBossNameLabel.setForeground(PbTrackerTheme.GOLD_LIGHT);
-		selectedBossNameLabel.setFont(FontManager.getRunescapeBoldFont());
+		java.awt.Font nameFont = FontManager.getRunescapeBoldFont();
+		selectedBossNameLabel.setFont(nameFont.deriveFont(nameFont.getSize2D() + 2f));
 		selectedBossBar.add(selectedBossNameLabel, BorderLayout.CENTER);
 
 		// A real bordered button, not just "(change)" tacked onto the boss
@@ -427,8 +428,10 @@ class BossesTab extends JPanel
 		JComboBox<BossGroups.KeyLabel> sizeCombo = new JComboBox<>(mode.variants.toArray(new BossGroups.KeyLabel[0]));
 		sizeCombo.setBackground(PbTrackerTheme.PANEL);
 		sizeCombo.setForeground(PbTrackerTheme.TEXT);
-		sizeCombo.setFont(FontManager.getRunescapeFont());
+		java.awt.Font comboFont = FontManager.getRunescapeFont();
+		sizeCombo.setFont(comboFont.deriveFont(comboFont.getSize2D() + 2f));
 		sizeCombo.setBorder(BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER));
+		sizeCombo.setPreferredSize(new Dimension(0, 32));
 		sizeCombo.setFocusable(false);
 		sizeCombo.addActionListener(e ->
 		{
@@ -459,7 +462,7 @@ class BossesTab extends JPanel
 			label.setForeground(isActive ? PbTrackerTheme.GOLD_LIGHT : PbTrackerTheme.TEXT);
 			label.setBorder(BorderFactory.createCompoundBorder(
 				BorderFactory.createLineBorder(isActive ? PbTrackerTheme.GOLD : PbTrackerTheme.PANEL_BORDER),
-				BorderFactory.createEmptyBorder(3, 8, 3, 8)
+				BorderFactory.createEmptyBorder(5, 10, 5, 10)
 			));
 		}
 	}
@@ -468,9 +471,10 @@ class BossesTab extends JPanel
 	{
 		JLabel label = new JLabel(text);
 		label.setForeground(PbTrackerTheme.TEXT);
+		label.setFont(FontManager.getRunescapeBoldFont());
 		label.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER),
-			BorderFactory.createEmptyBorder(3, 8, 3, 8)
+			BorderFactory.createEmptyBorder(5, 10, 5, 10)
 		));
 		label.setOpaque(true);
 		label.setBackground(PbTrackerTheme.PANEL);
