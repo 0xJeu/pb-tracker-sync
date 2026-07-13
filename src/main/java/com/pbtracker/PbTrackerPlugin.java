@@ -226,6 +226,9 @@ public class PbTrackerPlugin extends Plugin
 	@Inject
 	private net.runelite.client.ui.ClientToolbar clientToolbar;
 
+	@Inject
+	private net.runelite.client.game.SpriteManager spriteManager;
+
 	private PbTrackerSidePanel sidePanel;
 	private net.runelite.client.ui.NavigationButton navButton;
 
@@ -251,7 +254,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())

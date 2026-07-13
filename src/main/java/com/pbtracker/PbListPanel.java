@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
@@ -33,10 +34,12 @@ import java.util.function.BiConsumer;
  */
 class PbListPanel extends JPanel implements Scrollable
 {
+	private final SpriteManager spriteManager;
 	private final JPanel rowsContainer = new JPanel();
 
-	PbListPanel()
+	PbListPanel(SpriteManager spriteManager)
 	{
+		this.spriteManager = spriteManager;
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
@@ -254,13 +257,13 @@ class PbListPanel extends JPanel implements Scrollable
 		return line;
 	}
 
-	/** A 26x26 boss icon, or a blank label of the same width if no art exists - keeps rows aligned either way. */
+	/** A 26x26 boss icon (loaded asynchronously), or a blank label of the same width if none exists - keeps rows aligned either way. */
 	private JLabel buildIconLabel(String bossKey)
 	{
-		javax.swing.ImageIcon icon = BossIcons.get(bossKey);
-		JLabel label = new JLabel(icon);
+		JLabel label = new JLabel();
 		label.setPreferredSize(new Dimension(26, 26));
 		label.setHorizontalAlignment(SwingConstants.CENTER);
+		BossIcons.get(spriteManager, bossKey, label::setIcon);
 		return label;
 	}
 

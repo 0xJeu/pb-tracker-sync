@@ -1,5 +1,7 @@
 package com.pbtracker;
 
+import net.runelite.client.game.SpriteManager;
+
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
@@ -16,12 +18,13 @@ class MyPbsTab extends JPanel
 {
 	private final SyncClient syncClient;
 	private final BiConsumer<String, String> onBossClickHandler;
-	private final PbListPanel listPanel = new PbListPanel();
+	private final PbListPanel listPanel;
 
-	MyPbsTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
+		this.listPanel = new PbListPanel(spriteManager);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 

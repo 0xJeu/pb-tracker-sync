@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import net.runelite.client.game.SpriteManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -21,13 +22,14 @@ class PlayerSearchTab extends JPanel
 {
 	private final SyncClient syncClient;
 	private final BiConsumer<String, String> onBossClickHandler;
-	private final PbListPanel listPanel = new PbListPanel();
+	private final PbListPanel listPanel;
 	private final JTextField searchField = new JTextField();
 
-	PlayerSearchTab(SyncClient syncClient, BiConsumer<String, String> onBossClick)
+	PlayerSearchTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
+		this.listPanel = new PbListPanel(spriteManager);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 

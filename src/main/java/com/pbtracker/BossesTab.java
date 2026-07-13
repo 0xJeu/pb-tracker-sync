@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.FontManager;
 
 import javax.swing.BorderFactory;
@@ -46,6 +47,7 @@ class BossesTab extends JPanel
 	private static final String PLACEHOLDER = "Search bosses...";
 
 	private final SyncClient syncClient;
+	private final SpriteManager spriteManager;
 	private final Consumer<String> onPlayerClick;
 
 	private final DefaultListModel<PickerEntry> listModel = new DefaultListModel<>();
@@ -61,6 +63,7 @@ class BossesTab extends JPanel
 
 	private List<String> allBosses = List.of();
 	private String pendingHighlight;
+	private String selectedBossIconKey;
 
 	private static final class PickerEntry
 	{
@@ -76,9 +79,10 @@ class BossesTab extends JPanel
 		}
 	}
 
-	BossesTab(SyncClient syncClient, Consumer<String> onPlayerClick)
+	BossesTab(SyncClient syncClient, SpriteManager spriteManager, Consumer<String> onPlayerClick)
 	{
 		this.syncClient = syncClient;
+		this.spriteManager = spriteManager;
 		this.onPlayerClick = onPlayerClick;
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
@@ -193,8 +197,16 @@ class BossesTab extends JPanel
 		});
 	}
 
-	/** Bold + a "raid" marker for raid bases, plain for everything else, proper padding either way. */
-	private static final class PickerEntryRenderer extends DefaultListCellRenderer
+	/**
+	 * Bold + a "raid" marker for raid bases, plain for everything else,
+	 * proper padding either way. The icon label is a shared, transient
+	 * component JList reuses across every row it paints - a sprite that
+	 * finishes loading asynchronously can't safely be applied to it
+	 * directly (it may already be rendering a different row), so an
+	 * uncached icon triggers a fetch that just repaints the list once
+	 * ready, and the next render pass picks it up from the cache.
+	 */
+	private final class PickerEntryRenderer extends DefaultListCellRenderer
 	{
 		@Override
 		public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus)
@@ -202,7 +214,16 @@ class BossesTab extends JPanel
 			JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 			PickerEntry entry = (PickerEntry) value;
 			label.setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 10));
-			label.setIcon(BossIcons.get(entry.key));
+			javax.swing.ImageIcon icon = BossIcons.getCached(entry.key);
+			if (icon != null)
+			{
+				label.setIcon(icon);
+			}
+			else
+			{
+				label.setIcon(null);
+				BossIcons.get(spriteManager, entry.key, loaded -> list.repaint());
+			}
 			label.setIconTextGap(8);
 			if (entry.isRaidBase)
 			{
@@ -249,7 +270,17 @@ class BossesTab extends JPanel
 	private void showSelectedBossBar(String label, String iconKey)
 	{
 		selectedBossBar.setText(label + "   (change)");
-		selectedBossBar.setIcon(BossIcons.get(iconKey));
+		selectedBossBar.setIcon(null);
+		selectedBossIconKey = iconKey;
+		// Guards against a slow-loading icon from a previous selection
+		// landing after the user has already picked a different boss.
+		BossIcons.get(spriteManager, iconKey, icon ->
+		{
+			if (iconKey.equals(selectedBossIconKey))
+			{
+				selectedBossBar.setIcon(icon);
+			}
+		});
 		selectedBossBar.setIconTextGap(8);
 		pickerSection.setVisible(false);
 		selectedBossBar.setVisible(true);
