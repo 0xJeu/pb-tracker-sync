@@ -7,6 +7,7 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -404,29 +405,48 @@ class BossesTab extends JPanel
 		selectMode(modes.get(0), entry.label, sizeRow);
 	}
 
+	/**
+	 * A dropdown rather than a row of pill buttons - a raid+mode can have a
+	 * dozen-plus size/kind variants (1-5 players x Overall/Room, sometimes
+	 * legacy entries too), and a wall of buttons either wraps into a mess or
+	 * gets visually lost. A combo box scales to however many there are
+	 * without crowding anything else in the sidebar.
+	 */
 	private void selectMode(BossGroups.RaidMode mode, String raidLabel, JPanel sizeRow)
 	{
 		sizeRow.removeAll();
-		List<JLabel> sizeLabels = new ArrayList<>();
-		for (BossGroups.KeyLabel variant : mode.variants)
+		sizeRow.setLayout(new BorderLayout());
+
+		if (mode.variants.isEmpty())
 		{
-			JLabel sizeLabel = clickableLabel(variant.label, () ->
-			{
-				setActiveLabel(sizeLabels, sizeLabels.get(mode.variants.indexOf(variant)));
-				loadLeaderboard(variant.key, raidLabel + " - " + mode.modeLabel + " - " + variant.label);
-			});
-			sizeLabels.add(sizeLabel);
-			sizeRow.add(sizeLabel);
+			sizeRow.revalidate();
+			sizeRow.repaint();
+			return;
 		}
+
+		JComboBox<BossGroups.KeyLabel> sizeCombo = new JComboBox<>(mode.variants.toArray(new BossGroups.KeyLabel[0]));
+		sizeCombo.setBackground(PbTrackerTheme.PANEL);
+		sizeCombo.setForeground(PbTrackerTheme.TEXT);
+		sizeCombo.setFont(FontManager.getRunescapeFont());
+		sizeCombo.setBorder(BorderFactory.createLineBorder(PbTrackerTheme.PANEL_BORDER));
+		sizeCombo.setFocusable(false);
+		sizeCombo.addActionListener(e ->
+		{
+			BossGroups.KeyLabel selected = (BossGroups.KeyLabel) sizeCombo.getSelectedItem();
+			if (selected != null)
+			{
+				loadLeaderboard(selected.key, raidLabel + " - " + mode.modeLabel + " - " + selected.label);
+			}
+		});
+		sizeRow.add(sizeCombo, BorderLayout.CENTER);
 		sizeRow.revalidate();
 		sizeRow.repaint();
 
-		if (!mode.variants.isEmpty())
-		{
-			BossGroups.KeyLabel first = mode.variants.get(0);
-			setActiveLabel(sizeLabels, sizeLabels.get(0));
-			loadLeaderboard(first.key, raidLabel + " - " + mode.modeLabel + " - " + first.label);
-		}
+		// The combo box already defaults to index 0, but Swing only fires
+		// the ActionListener on an actual change - load the first size's
+		// leaderboard directly so one shows immediately, same as before.
+		BossGroups.KeyLabel first = mode.variants.get(0);
+		loadLeaderboard(first.key, raidLabel + " - " + mode.modeLabel + " - " + first.label);
 	}
 
 	/** Marks one label in the row as the active selection (gold border/text), clearing the others. */

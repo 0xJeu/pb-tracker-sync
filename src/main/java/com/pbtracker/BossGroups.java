@@ -272,6 +272,12 @@ final class BossGroups
 			this.key = key;
 			this.label = label;
 		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
 	}
 
 	/** One RaidGroup per raid+mode heading, found across every bare boss key in `bosses`. */
