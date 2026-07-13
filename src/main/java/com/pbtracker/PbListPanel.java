@@ -22,12 +22,11 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
- * Renders a player's synced PBs as: a headline "Overall" stat (their single
- * best hiscore rank across everything they track), a "Top Bosses" section
- * (their 5 best-ranked performances), and a collapsible "All Bosses" section
- * listing every boss this plugin knows about - with a dash for anything the
- * player hasn't recorded a time for yet, not just the ones they have.
- * Reused by both the "My PBs" and "Player Search" tabs.
+ * Renders a player's synced PBs as two collapsible sections: "Top Bosses"
+ * (their 5 best-ranked performances) and "All Bosses" (every boss this
+ * plugin knows about - with a dash for anything the player hasn't recorded
+ * a time for yet, not just the ones they have). Reused by both the "My PBs"
+ * and "Player Search" tabs.
  * <p>
  * Implements Scrollable so the enclosing JScrollPane's JViewport clamps this
  * panel's width to the actual visible width instead of using its raw (and,
@@ -43,6 +42,7 @@ class PbListPanel extends JPanel implements Scrollable
 
 	private List<String> allBosses = List.of();
 	private final Set<String> expandedHeadings = new HashSet<>();
+	private boolean topBossesSectionExpanded = true;
 	private boolean allBossesSectionExpanded = true;
 
 	private SyncClient.PlayerLookupResponse lastPlayer;
@@ -172,13 +172,16 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		ranked.sort(Comparator.comparingInt(r -> r.rank));
 
-		addSectionHeader("Top Bosses", false);
-		for (int i = 0; i < Math.min(5, ranked.size()); i++)
+		addSectionHeader("Top Bosses", topBossesSectionExpanded, () -> topBossesSectionExpanded = !topBossesSectionExpanded);
+		if (topBossesSectionExpanded)
 		{
-			addDisplayRow(ranked.get(i), player.displayName, onBossClick);
+			for (int i = 0; i < Math.min(5, ranked.size()); i++)
+			{
+				addDisplayRow(ranked.get(i), player.displayName, onBossClick);
+			}
 		}
 
-		addSectionHeader("All Bosses", true);
+		addSectionHeader("All Bosses", allBossesSectionExpanded, () -> allBossesSectionExpanded = !allBossesSectionExpanded);
 		if (allBossesSectionExpanded)
 		{
 			List<DisplayRow> sorted = new ArrayList<>(allRows);
@@ -276,7 +279,7 @@ class PbListPanel extends JPanel implements Scrollable
 		return new DisplayRow(key, key, primaryName, null, true, pb.timeSeconds, pb.rank, pb.boss, null);
 	}
 
-	private void addSectionHeader(String text, boolean collapsible)
+	private void addSectionHeader(String text, boolean expanded, Runnable onToggle)
 	{
 		JPanel row = new JPanel(new BorderLayout());
 		row.setBackground(PbTrackerTheme.BG);
@@ -287,18 +290,15 @@ class PbListPanel extends JPanel implements Scrollable
 		label.setFont(FontManager.getRunescapeBoldFont());
 		row.add(label, BorderLayout.WEST);
 
-		if (collapsible)
+		JLabel chevron = new JLabel(expanded ? "v" : ">");
+		chevron.setForeground(PbTrackerTheme.TEXT_DIM);
+		chevron.setFont(FontManager.getRunescapeBoldFont());
+		row.add(chevron, BorderLayout.EAST);
+		PbTrackerPlugin.addRowClickListener(row, () ->
 		{
-			JLabel chevron = new JLabel(allBossesSectionExpanded ? "v" : ">");
-			chevron.setForeground(PbTrackerTheme.TEXT_DIM);
-			chevron.setFont(FontManager.getRunescapeBoldFont());
-			row.add(chevron, BorderLayout.EAST);
-			PbTrackerPlugin.addRowClickListener(row, () ->
-			{
-				allBossesSectionExpanded = !allBossesSectionExpanded;
-				rerender();
-			});
-		}
+			onToggle.run();
+			rerender();
+		});
 
 		// Without this, BoxLayout falls back to the row's own narrow
 		// preferred width and its default 0.5 alignmentX, which visually
