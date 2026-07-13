@@ -28,7 +28,7 @@ class MyPbsTab extends JPanel
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick, Runnable onSettingsClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
@@ -37,7 +37,11 @@ class MyPbsTab extends JPanel
 		setBackground(PbTrackerTheme.BG);
 
 		viewOnWebsiteButton = buildViewOnWebsiteButton();
-		add(viewOnWebsiteButton, BorderLayout.NORTH);
+		JPanel topBar = new JPanel(new BorderLayout());
+		topBar.setBackground(PbTrackerTheme.BG);
+		topBar.add(viewOnWebsiteButton, BorderLayout.CENTER);
+		topBar.add(buildSettingsButton(onSettingsClick), BorderLayout.EAST);
+		add(topBar, BorderLayout.NORTH);
 
 		JScrollPane scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
@@ -67,6 +71,27 @@ class MyPbsTab extends JPanel
 				LinkBrowser.browse(PbTrackerPlugin.buildProfileUrl(currentDisplayName));
 			}
 		});
+		return button;
+	}
+
+	/**
+	 * Plain text "Settings", not a gear glyph - RuneLite's bitmap OSRS font
+	 * doesn't have a glyph for Unicode symbols like "⚙" and silently falls
+	 * back to a "tofu" box character instead (same issue the old chevron and
+	 * en-dash had).
+	 */
+	private JLabel buildSettingsButton(Runnable onSettingsClick)
+	{
+		JLabel button = new JLabel("Settings", SwingConstants.CENTER);
+		button.setForeground(PbTrackerTheme.TEXT);
+		button.setFont(FontManager.getRunescapeBoldFont());
+		button.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 1, 0, PbTrackerTheme.PANEL_BORDER),
+			BorderFactory.createEmptyBorder(8, 12, 8, 12)
+		));
+		button.setOpaque(true);
+		button.setBackground(PbTrackerTheme.PANEL);
+		PbTrackerPlugin.addRowClickListener(button, onSettingsClick);
 		return button;
 	}
 

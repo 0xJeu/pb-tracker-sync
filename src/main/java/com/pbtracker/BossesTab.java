@@ -351,9 +351,17 @@ class BossesTab extends JPanel
 		}
 		entries.sort(Comparator.comparing(en -> en.label));
 
+		// Same shorthand the !pbr chat command accepts ("tob", "cox", "sol",
+		// etc, from PbTrackerPlugin.BOSS_ALIASES) - typing an abbreviation
+		// filters the picker to that boss too, not just its full name.
+		String aliasTarget = PbTrackerPlugin.BOSS_ALIASES.get(filter);
+		String normalizedAliasTarget = aliasTarget != null ? BossGroups.normalize(aliasTarget) : null;
+
 		for (PickerEntry entry : entries)
 		{
-			if (filter.isEmpty() || entry.label.toLowerCase().contains(filter))
+			boolean matchesText = filter.isEmpty() || entry.label.toLowerCase().contains(filter);
+			boolean matchesAlias = normalizedAliasTarget != null && BossGroups.normalize(entry.key).equals(normalizedAliasTarget);
+			if (matchesText || matchesAlias)
 			{
 				listModel.addElement(entry);
 			}

@@ -159,7 +159,7 @@ public class PbTrackerPlugin extends Plugin
 	// vorkath" work without needing an entry - this map only exists for
 	// content whose stored key doesn't match what a player would naturally
 	// type (raid abbreviations, "the X" bosses, etc).
-	private static final Map<String, String> BOSS_ALIASES = new HashMap<>();
+	static final Map<String, String> BOSS_ALIASES = new HashMap<>();
 	static
 	{
 		BOSS_ALIASES.put("tob", "theatre of blood");
@@ -173,6 +173,7 @@ public class PbTrackerPlugin extends Plugin
 		BOSS_ALIASES.put("zuk", "inferno");
 		BOSS_ALIASES.put("colo", "fortis colosseum");
 		BOSS_ALIASES.put("colosseum", "fortis colosseum");
+		BOSS_ALIASES.put("sol", "fortis colosseum");
 		BOSS_ALIASES.put("gaunt", "the gauntlet");
 		BOSS_ALIASES.put("gauntlet", "the gauntlet");
 		BOSS_ALIASES.put("cgaunt", "the corrupted gauntlet");
@@ -254,7 +255,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, configManager, config);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
