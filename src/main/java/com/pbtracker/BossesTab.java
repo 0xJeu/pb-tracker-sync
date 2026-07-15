@@ -617,7 +617,8 @@ class BossesTab extends JPanel
 	private JPanel buildLeaderboardRow(int rank, SyncClient.LeaderboardRow row, boolean isHighlighted)
 	{
 		JPanel panel = new JPanel(new BorderLayout(8, 0));
-		panel.setBackground(isHighlighted ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL);
+		Color normalColor = isHighlighted ? PbTrackerTheme.HIGHLIGHT_BG : PbTrackerTheme.PANEL;
+		panel.setBackground(normalColor);
 		panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
 		JLabel rankAndName = new JLabel(rankBadge(rank) + "  " + row.displayName);
@@ -637,8 +638,41 @@ class BossesTab extends JPanel
 		));
 		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
 
+		addHoverHighlight(panel, normalColor, panel);
 		PbTrackerPlugin.addRowClickListener(panel, () -> onPlayerClick.accept(row.displayName));
 		return panel;
+	}
+
+	/**
+	 * Same recursive-listener approach as PbListPanel's addHoverHighlight -
+	 * mirrored here rather than shared because the two rows are otherwise
+	 * unrelated (PlayerLookupResponse.pbs rows vs. LeaderboardRow rows) and
+	 * this tab's row only ever needs to repaint the one outer panel, not a
+	 * text/stats sub-block pair.
+	 */
+	private void addHoverHighlight(Component component, Color normalColor, JComponent target)
+	{
+		component.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				target.setBackground(PbTrackerTheme.HIGHLIGHT_BG);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				target.setBackground(normalColor);
+			}
+		});
+		if (component instanceof java.awt.Container)
+		{
+			for (Component child : ((java.awt.Container) component).getComponents())
+			{
+				addHoverHighlight(child, normalColor, target);
+			}
+		}
 	}
 
 	/** Called from the "jump to leaderboard, scrolled to this player" flow (rank click on a PB row). */
