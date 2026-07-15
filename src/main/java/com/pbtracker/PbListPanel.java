@@ -51,6 +51,11 @@ class PbListPanel extends JPanel implements Scrollable
 	private boolean topBossesSectionExpanded = true;
 	private boolean allBossesSectionExpanded = true;
 
+	// Rebuilt fresh on every render - lets the expand/collapse click handler
+	// find where its row landed in the just-rebuilt layout, since rerender()
+	// tears down and recreates every row rather than moving the existing one.
+	private final java.util.Map<String, Component> rowsByExpandKey = new java.util.HashMap<>();
+
 	private SyncClient.PlayerLookupResponse lastPlayer;
 	private BiConsumer<String, String> lastOnBossClick;
 
@@ -189,6 +194,7 @@ class PbListPanel extends JPanel implements Scrollable
 		lastPlayer = player;
 		lastOnBossClick = onBossClick;
 		rowsContainer.removeAll();
+		rowsByExpandKey.clear();
 
 		if (player.pbs == null || player.pbs.isEmpty())
 		{
@@ -437,6 +443,11 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		outer.add(statsBlock, BorderLayout.EAST);
 
+		if (expandable)
+		{
+			rowsByExpandKey.put(expandKey, outer);
+		}
+
 		addHoverHighlight(outer, PbTrackerTheme.PANEL, outer, textBlock, statsBlock);
 		PbTrackerPlugin.addRowClickListener(outer, () ->
 		{
@@ -451,6 +462,7 @@ class PbListPanel extends JPanel implements Scrollable
 					expandedHeadings.add(expandKey);
 				}
 				rerender();
+				centerRowInView(expandKey);
 			}
 			else
 			{
@@ -579,5 +591,36 @@ class PbListPanel extends JPanel implements Scrollable
 	{
 		log.debug("PB row activated: boss={}, player={}", bossKey, displayName);
 		onBossClick.accept(bossKey, displayName);
+	}
+
+	/**
+	 * Centers the just-toggled row in the enclosing scroll pane's viewport,
+	 * instead of leaving Swing's default "keep the same pixel offset"
+	 * behavior, which - since expanding pushes every row below it further
+	 * down the now-taller list - reads as the whole panel randomly
+	 * scrolling away from whatever you actually clicked. Deferred one tick
+	 * so rerender()'s freshly rebuilt rows have already been laid out and
+	 * their heights are known (same reasoning as BossesTab's leaderboard
+	 * auto-scroll).
+	 */
+	private void centerRowInView(String expandKey)
+	{
+		javax.swing.SwingUtilities.invokeLater(() ->
+		{
+			Component row = rowsByExpandKey.get(expandKey);
+			javax.swing.JViewport viewport = (javax.swing.JViewport)
+				javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, this);
+			if (row == null || viewport == null)
+			{
+				return;
+			}
+
+			java.awt.Point rowOrigin = javax.swing.SwingUtilities.convertPoint(row, 0, 0, viewport.getView());
+			int viewportHeight = viewport.getExtentSize().height;
+			int viewHeight = viewport.getView().getHeight();
+			int targetY = rowOrigin.y - (viewportHeight - row.getHeight()) / 2;
+			targetY = Math.max(0, Math.min(targetY, Math.max(0, viewHeight - viewportHeight)));
+			viewport.setViewPosition(new java.awt.Point(0, targetY));
+		});
 	}
 }
