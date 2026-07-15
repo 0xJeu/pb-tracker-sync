@@ -569,11 +569,18 @@ public class PbTrackerPlugin extends Plugin
 			return true;
 		}
 
-		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
-			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
+		// "\\d+\\+ players" (not "\\d\\+ players") - Chambers of Xeric's
+		// largest team-size bucket is "24+ players", a two-digit count, which
+		// a single-digit "\\d\\+" silently failed to match (and so did the
+		// no-plus/range alternatives), letting both Normal and Challenge Mode
+		// 24+ records slip through as unrecognized raw keys that synced
+		// under their raw name instead of being grouped under Chambers Of
+		// Xeric like every other team size.
+		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$")
+			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$")
 			|| lower.matches("^theatre of blood (entry mode|hard mode) (solo|\\d+ players)$")
 			|| lower.matches("^tombs of amascut (entry mode|expert mode) (solo|\\d+ players)$")
-			|| lower.matches("^nightmare (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$");
+			|| lower.matches("^nightmare (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$");
 	}
 
 	static boolean shouldTriggerSyncNow(String newValue)

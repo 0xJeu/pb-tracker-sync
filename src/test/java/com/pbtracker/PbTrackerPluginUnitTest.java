@@ -54,6 +54,17 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void skipsChambersOfXericLargestTeamSizeBucketInBothModes()
+	{
+		// "24+ players" is two digits before the "+" - a regex that only
+		// matched a single digit there let both of these slip through as
+		// unrecognized raw keys instead of being grouped under Chambers Of
+		// Xeric like every other team size.
+		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("chambers of xeric 24+ players"));
+		assertFalse(PbTrackerPlugin.shouldSyncRawPersonalBest("chambers of xeric challenge mode 24+ players"));
+	}
+
+	@Test
 	public void skipsNightmareTeamSizeVariants()
 	{
 		// Bare "nightmare" is gated separately via KNOWN_DUPLICATE_RAW_KEYS
