@@ -94,6 +94,8 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SYNC_STATUS_KEY = "syncStatus";
 	private static final String DUMP_RAW_KEY = "dumpRawPbs";
 	private static final String OPEN_PROFILE_KEY = "openProfile";
+	private static final String SHOW_OVERALL_VARIANTS_KEY = "showOverallVariants";
+	private static final String SHOW_ROOM_VARIANTS_KEY = "showRoomVariants";
 	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -275,7 +277,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
@@ -498,6 +500,11 @@ public class PbTrackerPlugin extends Plugin
 			{
 				executor.execute(this::openProfile);
 			}
+			else if ((SHOW_OVERALL_VARIANTS_KEY.equals(event.getKey()) || SHOW_ROOM_VARIANTS_KEY.equals(event.getKey()))
+				&& sidePanel != null)
+			{
+				sidePanel.onSettingsChanged();
+			}
 			return;
 		}
 
@@ -562,11 +569,18 @@ public class PbTrackerPlugin extends Plugin
 			return true;
 		}
 
-		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
-			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$")
+		// "\\d+\\+ players" (not "\\d\\+ players") - Chambers of Xeric's
+		// largest team-size bucket is "24+ players", a two-digit count, which
+		// a single-digit "\\d\\+" silently failed to match (and so did the
+		// no-plus/range alternatives), letting both Normal and Challenge Mode
+		// 24+ records slip through as unrecognized raw keys that synced
+		// under their raw name instead of being grouped under Chambers Of
+		// Xeric like every other team size.
+		return lower.matches("^(chambers of xeric|theatre of blood|tombs of amascut)(?: .*)? (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$")
+			|| lower.matches("^chambers of xeric challenge mode (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$")
 			|| lower.matches("^theatre of blood (entry mode|hard mode) (solo|\\d+ players)$")
 			|| lower.matches("^tombs of amascut (entry mode|expert mode) (solo|\\d+ players)$")
-			|| lower.matches("^nightmare (solo|\\d+ players|\\d\\+ players|\\d+-\\d+ players)$");
+			|| lower.matches("^nightmare (solo|\\d+ players|\\d+\\+ players|\\d+-\\d+ players)$");
 	}
 
 	static boolean shouldTriggerSyncNow(String newValue)

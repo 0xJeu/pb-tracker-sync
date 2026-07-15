@@ -43,6 +43,7 @@ import java.util.function.BiConsumer;
 class PbListPanel extends JPanel implements Scrollable
 {
 	private final SpriteManager spriteManager;
+	private final PbTrackerConfig config;
 	private final JPanel rowsContainer = new JPanel();
 
 	private List<String> allBosses = List.of();
@@ -50,18 +51,30 @@ class PbListPanel extends JPanel implements Scrollable
 	private boolean topBossesSectionExpanded = true;
 	private boolean allBossesSectionExpanded = true;
 
+	// Rebuilt fresh on every render - lets the expand/collapse click handler
+	// find where its row landed in the just-rebuilt layout, since rerender()
+	// tears down and recreates every row rather than moving the existing one.
+	private final java.util.Map<String, Component> rowsByExpandKey = new java.util.HashMap<>();
+
 	private SyncClient.PlayerLookupResponse lastPlayer;
 	private BiConsumer<String, String> lastOnBossClick;
 
-	PbListPanel(SpriteManager spriteManager)
+	PbListPanel(SpriteManager spriteManager, PbTrackerConfig config)
 	{
 		this.spriteManager = spriteManager;
+		this.config = config;
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
 		rowsContainer.setLayout(new GridBagLayout());
 		rowsContainer.setBackground(PbTrackerTheme.BG);
 		add(rowsContainer, BorderLayout.NORTH);
+	}
+
+	/** Called when the "Show Overall/Room times" settings change, to re-render with the new filter applied. */
+	void onSettingsChanged()
+	{
+		rerender();
 	}
 
 	/** Every boss key this plugin knows about system-wide - used to show a dash row for anything this player hasn't done yet. */
@@ -181,6 +194,7 @@ class PbListPanel extends JPanel implements Scrollable
 		lastPlayer = player;
 		lastOnBossClick = onBossClick;
 		rowsContainer.removeAll();
+		rowsByExpandKey.clear();
 
 		if (player.pbs == null || player.pbs.isEmpty())
 		{
@@ -212,7 +226,7 @@ class PbListPanel extends JPanel implements Scrollable
 		{
 			for (int i = 0; i < Math.min(5, ranked.size()); i++)
 			{
-				addDisplayRow(ranked.get(i).forTopBosses(), player.displayName, onBossClick);
+				addDisplayRow("top", ranked.get(i).forTopBosses(), player.displayName, onBossClick);
 			}
 		}
 
@@ -223,7 +237,7 @@ class PbListPanel extends JPanel implements Scrollable
 			sorted.sort(Comparator.comparing(r -> r.primaryName.toLowerCase()));
 			for (DisplayRow row : sorted)
 			{
-				addDisplayRow(row, player.displayName, onBossClick);
+				addDisplayRow("all", row, player.displayName, onBossClick);
 			}
 		}
 
@@ -346,10 +360,18 @@ class PbListPanel extends JPanel implements Scrollable
 	 * "collapsable to see the other PBs under the boss"); otherwise it jumps
 	 * straight to that boss's leaderboard, same as before.
 	 */
-	private void addDisplayRow(DisplayRow row, String displayName, BiConsumer<String, String> onBossClick)
+	/**
+	 * @param section distinguishes "Top Bosses" from "All Bosses" so the same
+	 *                raid heading (e.g. Chambers Of Xeric) can be expanded
+	 *                independently in each section - previously both shared
+	 *                one key, so expanding it in one section expanded it in
+	 *                the other too.
+	 */
+	private void addDisplayRow(String section, DisplayRow row, String displayName, BiConsumer<String, String> onBossClick)
 	{
+		String expandKey = section + ":" + row.heading;
 		boolean expandable = row.variants != null;
-		boolean expanded = expandable && expandedHeadings.contains(row.heading);
+		boolean expanded = expandable && expandedHeadings.contains(expandKey);
 
 		JPanel outer = new JPanel(new BorderLayout(8, 0));
 		outer.setBackground(PbTrackerTheme.PANEL);
@@ -421,19 +443,26 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		outer.add(statsBlock, BorderLayout.EAST);
 
+		if (expandable)
+		{
+			rowsByExpandKey.put(expandKey, outer);
+		}
+
+		addHoverHighlight(outer, PbTrackerTheme.PANEL, outer, textBlock, statsBlock);
 		PbTrackerPlugin.addRowClickListener(outer, () ->
 		{
 			if (expandable)
 			{
-				if (expandedHeadings.contains(row.heading))
+				if (expandedHeadings.contains(expandKey))
 				{
-					expandedHeadings.remove(row.heading);
+					expandedHeadings.remove(expandKey);
 				}
 				else
 				{
-					expandedHeadings.add(row.heading);
+					expandedHeadings.add(expandKey);
 				}
 				rerender();
+				centerRowInView(expandKey);
 			}
 			else
 			{
@@ -446,9 +475,23 @@ class PbListPanel extends JPanel implements Scrollable
 		{
 			for (BossGroups.PlayerRaidVariant variant : row.variants)
 			{
+				if (isHiddenByConfig(variant.kind))
+				{
+					continue;
+				}
 				addVariantSubRow(variant, displayName, onBossClick);
 			}
 		}
+	}
+
+	/** Lets "Show Overall/Room times" settings hide the corresponding team-size sub-rows to declutter the breakdown. */
+	private boolean isHiddenByConfig(BossGroups.VariantKind kind)
+	{
+		if (kind == BossGroups.VariantKind.OVERALL && !config.showOverallVariants())
+		{
+			return true;
+		}
+		return kind == BossGroups.VariantKind.ROOM && !config.showRoomVariants();
 	}
 
 	/** An indented, smaller row for one team-size/mode variant beneath its expanded raid+mode heading. */
@@ -464,6 +507,7 @@ class PbListPanel extends JPanel implements Scrollable
 
 		JTextArea line = wrappedLabel(variant.label + "   " + PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank, PbTrackerTheme.TEXT, false);
 		row.add(line, BorderLayout.CENTER);
+		addHoverHighlight(row, PbTrackerTheme.ROW_BG, row);
 		PbTrackerPlugin.addRowClickListener(row, () -> activateBoss(variant.key, displayName, onBossClick));
 		addFullWidthRow(row);
 	}
@@ -490,6 +534,44 @@ class PbListPanel extends JPanel implements Scrollable
 	}
 
 	/**
+	 * Recurses into every descendant (mirroring PbTrackerPlugin.addRowClickListener)
+	 * so the highlight tracks the mouse regardless of which child label it's
+	 * actually over, and paints every opaque panel in `targets` (the row's
+	 * outer container plus any opaque sub-panels layered on top of it, which
+	 * would otherwise hide a background change on the outer alone).
+	 */
+	private void addHoverHighlight(Component component, java.awt.Color normalColor, javax.swing.JComponent... targets)
+	{
+		component.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent e)
+			{
+				for (javax.swing.JComponent target : targets)
+				{
+					target.setBackground(PbTrackerTheme.HIGHLIGHT_BG);
+				}
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent e)
+			{
+				for (javax.swing.JComponent target : targets)
+				{
+					target.setBackground(normalColor);
+				}
+			}
+		});
+		if (component instanceof java.awt.Container)
+		{
+			for (Component child : ((java.awt.Container) component).getComponents())
+			{
+				addHoverHighlight(child, normalColor, targets);
+			}
+		}
+	}
+
+	/**
 	 * GridBagLayout with horizontal fill avoids BoxLayout shrinking each card
 	 * to its preferred text width, which left a large blank gutter beside
 	 * shorter boss names in RuneLite's narrow sidebar.
@@ -509,5 +591,36 @@ class PbListPanel extends JPanel implements Scrollable
 	{
 		log.debug("PB row activated: boss={}, player={}", bossKey, displayName);
 		onBossClick.accept(bossKey, displayName);
+	}
+
+	/**
+	 * Centers the just-toggled row in the enclosing scroll pane's viewport,
+	 * instead of leaving Swing's default "keep the same pixel offset"
+	 * behavior, which - since expanding pushes every row below it further
+	 * down the now-taller list - reads as the whole panel randomly
+	 * scrolling away from whatever you actually clicked. Deferred one tick
+	 * so rerender()'s freshly rebuilt rows have already been laid out and
+	 * their heights are known (same reasoning as BossesTab's leaderboard
+	 * auto-scroll).
+	 */
+	private void centerRowInView(String expandKey)
+	{
+		javax.swing.SwingUtilities.invokeLater(() ->
+		{
+			Component row = rowsByExpandKey.get(expandKey);
+			javax.swing.JViewport viewport = (javax.swing.JViewport)
+				javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, this);
+			if (row == null || viewport == null)
+			{
+				return;
+			}
+
+			java.awt.Point rowOrigin = javax.swing.SwingUtilities.convertPoint(row, 0, 0, viewport.getView());
+			int viewportHeight = viewport.getExtentSize().height;
+			int viewHeight = viewport.getView().getHeight();
+			int targetY = rowOrigin.y - (viewportHeight - row.getHeight()) / 2;
+			targetY = Math.max(0, Math.min(targetY, Math.max(0, viewHeight - viewportHeight)));
+			viewport.setViewPosition(new java.awt.Point(0, targetY));
+		});
 	}
 }
