@@ -30,11 +30,11 @@ class MyPbsTab extends JPanel
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
-		this.listPanel = new PbListPanel(spriteManager);
+		this.listPanel = new PbListPanel(spriteManager, config);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
@@ -124,5 +124,10 @@ class MyPbsTab extends JPanel
 		requestGeneration++;
 		currentDisplayName = null;
 		listPanel.showMessage("Log in to see your PBs.");
+	}
+
+	void onSettingsChanged()
+	{
+		listPanel.onSettingsChanged();
 	}
 }

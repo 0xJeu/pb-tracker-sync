@@ -26,7 +26,7 @@ public class PbListPanelTest
 		AtomicBoolean clicked = new AtomicBoolean();
 		SwingUtilities.invokeAndWait(() ->
 		{
-			PbListPanel panel = new PbListPanel(null);
+			PbListPanel panel = new PbListPanel(null, null);
 			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
 			player.displayName = "Tester";
 			SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
@@ -48,7 +48,7 @@ public class PbListPanelTest
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
-			PbListPanel panel = new PbListPanel(null);
+			PbListPanel panel = new PbListPanel(null, null);
 			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
 			player.displayName = "Tester";
 			SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
@@ -61,6 +61,58 @@ public class PbListPanelTest
 			panel.setAllBosses(java.util.List.of("zulrah", "vorkath"));
 
 			assertTrue(findTextAreaOrNull(panel, "Vorkath") != null);
+		});
+	}
+
+	private static final class FakeConfig implements PbTrackerConfig
+	{
+		private final boolean showOverall;
+		private final boolean showRoom;
+
+		FakeConfig(boolean showOverall, boolean showRoom)
+		{
+			this.showOverall = showOverall;
+			this.showRoom = showRoom;
+		}
+
+		@Override
+		public boolean showOverallVariants()
+		{
+			return showOverall;
+		}
+
+		@Override
+		public boolean showRoomVariants()
+		{
+			return showRoom;
+		}
+	}
+
+	@Test
+	public void hidesOverallVariantRowsWhenConfiguredOff() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			PbListPanel panel = new PbListPanel(null, new FakeConfig(false, true));
+			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
+			player.displayName = "Tester";
+			SyncClient.PbEntryDto overall = new SyncClient.PbEntryDto();
+			overall.boss = "theatre of blood - fastest overall (3 player)";
+			overall.timeSeconds = 1200;
+			overall.rank = 2;
+			SyncClient.PbEntryDto room = new SyncClient.PbEntryDto();
+			room.boss = "theatre of blood - fastest room (3 player)";
+			room.timeSeconds = 500;
+			room.rank = 1;
+			player.pbs = java.util.List.of(overall, room);
+			panel.showPlayer(player, (boss, name) -> { });
+
+			JTextArea heading = findTextArea(panel, "Theatre Of Blood");
+			heading.dispatchEvent(new MouseEvent(heading, MouseEvent.MOUSE_PRESSED,
+				System.currentTimeMillis(), 0, 2, 2, 1, false));
+
+			assertTrue(findTextAreaOrNull(panel, "Trio - Room   8:20   #1") != null);
+			assertTrue(findTextAreaOrNull(panel, "Trio - Overall   20:00   #2") == null);
 		});
 	}
 

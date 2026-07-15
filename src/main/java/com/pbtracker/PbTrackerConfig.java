@@ -112,4 +112,28 @@ public interface PbTrackerConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		keyName = "showOverallVariants",
+		name = "Show \"Overall\" times",
+		description = "Show \"Overall\" times when a raid's team-size breakdown is expanded in the side "
+			+ "panel. Uncheck to hide them if you only care about Room times.",
+		position = 9
+	)
+	default boolean showOverallVariants()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showRoomVariants",
+		name = "Show \"Room\" times",
+		description = "Show \"Room\" times when a raid's team-size breakdown is expanded in the side "
+			+ "panel. Uncheck to hide them if you only care about Overall times.",
+		position = 10
+	)
+	default boolean showRoomVariants()
+	{
+		return true;
+	}
 }

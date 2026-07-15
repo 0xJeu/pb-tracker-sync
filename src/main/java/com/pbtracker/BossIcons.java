@@ -49,6 +49,7 @@ final class BossIcons
 		Map.entry("sol_heredit", "fortis_colosseum"),
 		Map.entry("tzkal_zuk", "inferno"),
 		Map.entry("fight_caves", "tzhaar_fight_cave"),
+		Map.entry("tzhaar_ket_raks_challenges", "tztok_jad"),
 		Map.entry("tzhaar_ket_raks_first_challenge", "tztok_jad"),
 		Map.entry("tzhaar_ket_raks_second_challenge", "tztok_jad"),
 		Map.entry("tzhaar_ket_raks_third_challenge", "tztok_jad"),

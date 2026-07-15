@@ -27,11 +27,11 @@ class PlayerSearchTab extends JPanel
 	private final JScrollPane scrollPane;
 	private long requestGeneration;
 
-	PlayerSearchTab(SyncClient syncClient, SpriteManager spriteManager, BiConsumer<String, String> onBossClick)
+	PlayerSearchTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
-		this.listPanel = new PbListPanel(spriteManager);
+		this.listPanel = new PbListPanel(spriteManager, config);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
@@ -116,5 +116,10 @@ class PlayerSearchTab extends JPanel
 	private void scrollToTop()
 	{
 		SwingUtilities.invokeLater(() -> scrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0)));
+	}
+
+	void onSettingsChanged()
+	{
+		listPanel.onSettingsChanged();
 	}
 }

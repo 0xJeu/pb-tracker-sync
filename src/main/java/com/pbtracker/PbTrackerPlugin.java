@@ -94,6 +94,8 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SYNC_STATUS_KEY = "syncStatus";
 	private static final String DUMP_RAW_KEY = "dumpRawPbs";
 	private static final String OPEN_PROFILE_KEY = "openProfile";
+	private static final String SHOW_OVERALL_VARIANTS_KEY = "showOverallVariants";
+	private static final String SHOW_ROOM_VARIANTS_KEY = "showRoomVariants";
 	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -275,7 +277,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
@@ -497,6 +499,11 @@ public class PbTrackerPlugin extends Plugin
 			else if (OPEN_PROFILE_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
 				executor.execute(this::openProfile);
+			}
+			else if ((SHOW_OVERALL_VARIANTS_KEY.equals(event.getKey()) || SHOW_ROOM_VARIANTS_KEY.equals(event.getKey()))
+				&& sidePanel != null)
+			{
+				sidePanel.onSettingsChanged();
 			}
 			return;
 		}

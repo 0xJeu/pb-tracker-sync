@@ -42,6 +42,21 @@ final class BossGroups
 		"chambers of xeric", "theatre of blood", "tombs of amascut", "the nightmare"
 	);
 
+	// The 6 Tzhaar-Ket-Rak challenges are separate boss keys entirely (no
+	// " - "-delimited mode/size suffix like a raid variant), so they get
+	// their own grouping path rather than going through parseRaidVariant's
+	// raid-heading logic - collapsed into one "Tzhaar-Ket-Rak's Challenges"
+	// heading instead of 6 flat rows cluttering the list.
+	private static final String TZHAAR_CHALLENGE_PREFIX = "tzhaar-ket-rak's";
+	private static final String TZHAAR_CHALLENGE_BASE = "tzhaar-ket-rak's challenges";
+	// Built via titleCase() rather than hand-capitalized, so it matches what
+	// getRaidModes() independently recomputes as titleCase(base) when the
+	// user drills into this "raid base" from the picker.
+	private static final String TZHAAR_CHALLENGES_HEADING = PbTrackerPlugin.titleCase(TZHAAR_CHALLENGE_BASE);
+	private static final Map<String, Integer> TZHAAR_CHALLENGE_ORDER = Map.of(
+		"first", 1, "second", 2, "third", 3, "fourth", 4, "fifth", 5, "sixth", 6
+	);
+
 	private static final List<String> SLAYER_MONSTERS = List.of(
 		"kraken", "cerberus", "thermonuclear smoke devil", "alchemical hydra", "abyssal sire",
 		"grotesque guardians", "araxxor", "shellbane gryphon", "skotizo", "kalphite queen"
@@ -110,6 +125,10 @@ final class BossGroups
 	static boolean isGroupedVariant(String key)
 	{
 		String lower = key.trim().toLowerCase();
+		if (lower.startsWith(TZHAAR_CHALLENGE_PREFIX))
+		{
+			return true;
+		}
 		for (String p : GROUPED_BOSS_PREFIXES)
 		{
 			if (lower.equals(p) || lower.startsWith(p + " -"))
@@ -165,6 +184,13 @@ final class BossGroups
 
 	private static RaidVariant parseRaidVariant(String bossKey)
 	{
+		String lower = bossKey.trim().toLowerCase();
+		if (lower.startsWith(TZHAAR_CHALLENGE_PREFIX))
+		{
+			String subLabel = PbTrackerPlugin.titleCase(lower.substring(TZHAAR_CHALLENGE_PREFIX.length()).trim());
+			return new RaidVariant(bossKey, TZHAAR_CHALLENGE_BASE, "", TZHAAR_CHALLENGES_HEADING, subLabel);
+		}
+
 		String[] segments = bossKey.trim().toLowerCase().split(" - ");
 		for (int i = 0; i < segments.length; i++)
 		{
@@ -188,6 +214,13 @@ final class BossGroups
 		if (lower.contains("solo"))
 		{
 			return 1;
+		}
+		for (Map.Entry<String, Integer> ordinal : TZHAAR_CHALLENGE_ORDER.entrySet())
+		{
+			if (lower.startsWith(ordinal.getKey()))
+			{
+				return ordinal.getValue();
+			}
 		}
 		Matcher m = DIGIT_PATTERN.matcher(lower);
 		return m.find() ? Integer.parseInt(m.group(1)) : 999;

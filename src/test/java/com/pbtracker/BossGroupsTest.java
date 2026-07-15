@@ -220,6 +220,45 @@ public class BossGroupsTest
 		assertEquals(List.of("Trio - Overall", "Trio - Room", "Overall", "Fastest Room (Former)"), labels);
 	}
 
+	@Test
+	public void isGroupedVariantTrueForTzhaarChallenges()
+	{
+		assertTrue(BossGroups.isGroupedVariant("tzhaar-ket-rak's first challenge"));
+		assertTrue(BossGroups.isGroupedVariant("tzhaar-ket-rak's sixth challenge"));
+	}
+
+	@Test
+	public void collapsesTzhaarChallengesIntoOneRaidBase()
+	{
+		List<String> bosses = List.of(
+			"tzhaar-ket-rak's first challenge", "tzhaar-ket-rak's second challenge",
+			"tzhaar-ket-rak's third challenge", "tzhaar-ket-rak's fourth challenge",
+			"tzhaar-ket-rak's fifth challenge", "tzhaar-ket-rak's sixth challenge",
+			"zulrah"
+		);
+		List<BossGroups.RaidBase> bases = BossGroups.getRaidBases(bosses);
+		List<String> labels = bases.stream().map(b -> b.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("Tzhaar-ket-rak's Challenges"), labels);
+
+		List<BossGroups.RaidMode> modes = BossGroups.getRaidModes(bosses, bases.get(0).base);
+		assertEquals(1, modes.size());
+		List<String> variantLabels = modes.get(0).variants.stream().map(v -> v.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("First Challenge", "Second Challenge", "Third Challenge",
+			"Fourth Challenge", "Fifth Challenge", "Sixth Challenge"), variantLabels);
+	}
+
+	@Test
+	public void groupsPlayerTzhaarChallengePbsUnderOneHeading()
+	{
+		List<BossGroups.PlayerPb> pbs = List.of(
+			pb("tzhaar-ket-rak's first challenge", 120, 5),
+			pb("tzhaar-ket-rak's second challenge", 90, 2)
+		);
+		BossGroups.GroupedPlayerPbs result = BossGroups.groupPlayerRaidPbs(pbs);
+		BossGroups.PlayerRaidGroup group = findGroup(result, "Tzhaar-ket-rak's Challenges");
+		assertEquals(2, group.variants.size());
+	}
+
 	private static BossGroups.PlayerRaidGroup findGroup(BossGroups.GroupedPlayerPbs result, String heading)
 	{
 		return result.groups.stream().filter(g -> g.heading.equals(heading)).findFirst()

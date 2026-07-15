@@ -43,6 +43,7 @@ import java.util.function.BiConsumer;
 class PbListPanel extends JPanel implements Scrollable
 {
 	private final SpriteManager spriteManager;
+	private final PbTrackerConfig config;
 	private final JPanel rowsContainer = new JPanel();
 
 	private List<String> allBosses = List.of();
@@ -53,15 +54,22 @@ class PbListPanel extends JPanel implements Scrollable
 	private SyncClient.PlayerLookupResponse lastPlayer;
 	private BiConsumer<String, String> lastOnBossClick;
 
-	PbListPanel(SpriteManager spriteManager)
+	PbListPanel(SpriteManager spriteManager, PbTrackerConfig config)
 	{
 		this.spriteManager = spriteManager;
+		this.config = config;
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
 		rowsContainer.setLayout(new GridBagLayout());
 		rowsContainer.setBackground(PbTrackerTheme.BG);
 		add(rowsContainer, BorderLayout.NORTH);
+	}
+
+	/** Called when the "Show Overall/Room times" settings change, to re-render with the new filter applied. */
+	void onSettingsChanged()
+	{
+		rerender();
 	}
 
 	/** Every boss key this plugin knows about system-wide - used to show a dash row for anything this player hasn't done yet. */
@@ -212,7 +220,7 @@ class PbListPanel extends JPanel implements Scrollable
 		{
 			for (int i = 0; i < Math.min(5, ranked.size()); i++)
 			{
-				addDisplayRow(ranked.get(i).forTopBosses(), player.displayName, onBossClick);
+				addDisplayRow("top", ranked.get(i).forTopBosses(), player.displayName, onBossClick);
 			}
 		}
 
@@ -223,7 +231,7 @@ class PbListPanel extends JPanel implements Scrollable
 			sorted.sort(Comparator.comparing(r -> r.primaryName.toLowerCase()));
 			for (DisplayRow row : sorted)
 			{
-				addDisplayRow(row, player.displayName, onBossClick);
+				addDisplayRow("all", row, player.displayName, onBossClick);
 			}
 		}
 
@@ -346,10 +354,18 @@ class PbListPanel extends JPanel implements Scrollable
 	 * "collapsable to see the other PBs under the boss"); otherwise it jumps
 	 * straight to that boss's leaderboard, same as before.
 	 */
-	private void addDisplayRow(DisplayRow row, String displayName, BiConsumer<String, String> onBossClick)
+	/**
+	 * @param section distinguishes "Top Bosses" from "All Bosses" so the same
+	 *                raid heading (e.g. Chambers Of Xeric) can be expanded
+	 *                independently in each section - previously both shared
+	 *                one key, so expanding it in one section expanded it in
+	 *                the other too.
+	 */
+	private void addDisplayRow(String section, DisplayRow row, String displayName, BiConsumer<String, String> onBossClick)
 	{
+		String expandKey = section + ":" + row.heading;
 		boolean expandable = row.variants != null;
-		boolean expanded = expandable && expandedHeadings.contains(row.heading);
+		boolean expanded = expandable && expandedHeadings.contains(expandKey);
 
 		JPanel outer = new JPanel(new BorderLayout(8, 0));
 		outer.setBackground(PbTrackerTheme.PANEL);
@@ -421,17 +437,18 @@ class PbListPanel extends JPanel implements Scrollable
 		}
 		outer.add(statsBlock, BorderLayout.EAST);
 
+		addHoverHighlight(outer, PbTrackerTheme.PANEL, outer, textBlock, statsBlock);
 		PbTrackerPlugin.addRowClickListener(outer, () ->
 		{
 			if (expandable)
 			{
-				if (expandedHeadings.contains(row.heading))
+				if (expandedHeadings.contains(expandKey))
 				{
-					expandedHeadings.remove(row.heading);
+					expandedHeadings.remove(expandKey);
 				}
 				else
 				{
-					expandedHeadings.add(row.heading);
+					expandedHeadings.add(expandKey);
 				}
 				rerender();
 			}
@@ -446,9 +463,23 @@ class PbListPanel extends JPanel implements Scrollable
 		{
 			for (BossGroups.PlayerRaidVariant variant : row.variants)
 			{
+				if (isHiddenByConfig(variant.kind))
+				{
+					continue;
+				}
 				addVariantSubRow(variant, displayName, onBossClick);
 			}
 		}
+	}
+
+	/** Lets "Show Overall/Room times" settings hide the corresponding team-size sub-rows to declutter the breakdown. */
+	private boolean isHiddenByConfig(BossGroups.VariantKind kind)
+	{
+		if (kind == BossGroups.VariantKind.OVERALL && !config.showOverallVariants())
+		{
+			return true;
+		}
+		return kind == BossGroups.VariantKind.ROOM && !config.showRoomVariants();
 	}
 
 	/** An indented, smaller row for one team-size/mode variant beneath its expanded raid+mode heading. */
@@ -464,6 +495,7 @@ class PbListPanel extends JPanel implements Scrollable
 
 		JTextArea line = wrappedLabel(variant.label + "   " + PbTrackerPlugin.formatTime(variant.timeSeconds) + "   #" + variant.rank, PbTrackerTheme.TEXT, false);
 		row.add(line, BorderLayout.CENTER);
+		addHoverHighlight(row, PbTrackerTheme.ROW_BG, row);
 		PbTrackerPlugin.addRowClickListener(row, () -> activateBoss(variant.key, displayName, onBossClick));
 		addFullWidthRow(row);
 	}
@@ -487,6 +519,44 @@ class PbListPanel extends JPanel implements Scrollable
 		area.setBorder(null);
 		area.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
 		return area;
+	}
+
+	/**
+	 * Recurses into every descendant (mirroring PbTrackerPlugin.addRowClickListener)
+	 * so the highlight tracks the mouse regardless of which child label it's
+	 * actually over, and paints every opaque panel in `targets` (the row's
+	 * outer container plus any opaque sub-panels layered on top of it, which
+	 * would otherwise hide a background change on the outer alone).
+	 */
+	private void addHoverHighlight(Component component, java.awt.Color normalColor, javax.swing.JComponent... targets)
+	{
+		component.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent e)
+			{
+				for (javax.swing.JComponent target : targets)
+				{
+					target.setBackground(PbTrackerTheme.HIGHLIGHT_BG);
+				}
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent e)
+			{
+				for (javax.swing.JComponent target : targets)
+				{
+					target.setBackground(normalColor);
+				}
+			}
+		});
+		if (component instanceof java.awt.Container)
+		{
+			for (Component child : ((java.awt.Container) component).getComponents())
+			{
+				addHoverHighlight(child, normalColor, targets);
+			}
+		}
 	}
 
 	/**
