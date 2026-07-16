@@ -37,6 +37,18 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void pbrUsesTheVisibleChatSenderForSharedCommands()
+	{
+		assertEquals("Autisrick", PbTrackerPlugin.resolvePbrPlayerName("<img=13>Autisrick", false, "0xSteph"));
+	}
+
+	@Test
+	public void pbrUsesLocalPlayerForOutgoingPrivateMessages()
+	{
+		assertEquals("0xSteph", PbTrackerPlugin.resolvePbrPlayerName("Recipient", true, "0xSteph"));
+	}
+
+	@Test
 	public void keepsNonRaidKeysThatContainDigits()
 	{
 		assertTrue(PbTrackerPlugin.shouldSyncRawPersonalBest("hallowed sepulchre floor 5"));
