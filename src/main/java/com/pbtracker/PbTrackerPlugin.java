@@ -257,7 +257,6 @@ public class PbTrackerPlugin extends Plugin
 	private String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
-	private Dt2Scoreboard pendingDt2Scoreboard;
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -984,25 +983,11 @@ public class PbTrackerPlugin extends Plugin
 			// isn't populated until the following game tick.
 			journalScrollLoaded = true;
 		}
-
-		Dt2Scoreboard scoreboard = dt2ScoreboardForGroup(event.getGroupId());
-		if (scoreboard != null)
-		{
-			// The title and PB widgets populate after WidgetLoaded, so read them
-			// on the following game tick just like the Adventure Log parser.
-			pendingDt2Scoreboard = scoreboard;
-		}
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
-		if (pendingDt2Scoreboard != null)
-		{
-			Dt2Scoreboard scoreboard = pendingDt2Scoreboard;
-			pendingDt2Scoreboard = null;
-			syncDt2Scoreboard(scoreboard);
-		}
 
 		if (!journalScrollLoaded)
 		{
@@ -1123,71 +1108,6 @@ public class PbTrackerPlugin extends Plugin
 			candidate = localPlayerName;
 		}
 		return candidate == null || candidate.trim().isEmpty() ? null : candidate.trim();
-	}
-
-	private void syncDt2Scoreboard(Dt2Scoreboard scoreboard)
-	{
-		Widget titleWidget = client.getWidget(scoreboard.titleComponentId);
-		Widget pbWidget = client.getWidget(scoreboard.pbComponentId);
-		String title = titleWidget == null || titleWidget.getText() == null
-			? null
-			: Text.removeTags(titleWidget.getText());
-		String bossKey = dt2ScoreboardBossKey(scoreboard.bossName, title);
-		String rawTime = pbWidget == null || pbWidget.getText() == null
-			? null
-			: Text.removeTags(pbWidget.getText()).trim();
-		Double seconds = rawTime == null ? null : parseTimeString(rawTime);
-
-		if (bossKey == null || seconds == null)
-		{
-			log.debug("DT2 scoreboard was missing a recognizable title or PB value: title={}, value={}", title, rawTime);
-			return;
-		}
-
-		Map<String, Double> pb = new HashMap<>();
-		pb.put(bossKey, seconds);
-		log.debug("Recovered {} PB {} from its in-game scoreboard", bossKey, rawTime);
-		syncPbs(pb);
-	}
-
-	static String dt2ScoreboardBossKey(String bossName, String title)
-	{
-		if (bossName == null || title == null || !title.toLowerCase().contains(bossName.toLowerCase()))
-		{
-			return null;
-		}
-		return bossName + (title.toLowerCase().contains("awakened") ? " (awakened)" : "");
-	}
-
-	private static Dt2Scoreboard dt2ScoreboardForGroup(int groupId)
-	{
-		switch (groupId)
-		{
-			case InterfaceID.DUKE_SUCELLUS_SCOREBOARD:
-				return new Dt2Scoreboard("Duke Sucellus", InterfaceID.DukeSucellusScoreboard.TITLE_TEXT, InterfaceID.DukeSucellusScoreboard.PBT_CONTENT);
-			case InterfaceID.LEVIATHAN_SCOREBOARD:
-				return new Dt2Scoreboard("Leviathan", InterfaceID.LeviathanScoreboard.TITLE_TEXT, InterfaceID.LeviathanScoreboard.PBT_CONTENT);
-			case InterfaceID.WHISPERER_SCOREBOARD:
-				return new Dt2Scoreboard("Whisperer", InterfaceID.WhispererScoreboard.TITLE_TEXT, InterfaceID.WhispererScoreboard.PBT_CONTENT);
-			case InterfaceID.VARDORVIS_SCOREBOARD:
-				return new Dt2Scoreboard("Vardorvis", InterfaceID.VardorvisScoreboard.TITLE_TEXT, InterfaceID.VardorvisScoreboard.PBT_CONTENT);
-			default:
-				return null;
-		}
-	}
-
-	private static final class Dt2Scoreboard
-	{
-		private final String bossName;
-		private final int titleComponentId;
-		private final int pbComponentId;
-
-		private Dt2Scoreboard(String bossName, int titleComponentId, int pbComponentId)
-		{
-			this.bossName = bossName;
-			this.titleComponentId = titleComponentId;
-			this.pbComponentId = pbComponentId;
-		}
 	}
 
 	private static boolean isBareValue(String line)
