@@ -151,14 +151,34 @@ public class PbTrackerPlugin extends Plugin
 
 	// Explicit colors for !pbr's chat output rather than ChatColorType.NORMAL/
 	// HIGHLIGHT - those defer to the player's own configured chat colors,
-	// which on some setups render nearly identically (e.g. both a similar
-	// blue), making the response hard to read at a glance. These give three
-	// clearly distinct colors regardless of client theme - white for labels,
-	// the PB Tracker site's own gold for the time, green for rank.
-	private static final Color PBR_LABEL_COLOR = new Color(255, 255, 255);
-	private static final Color PBR_TIME_COLOR = new Color(255, 152, 31);
-	private static final Color PBR_RANK_COLOR = new Color(0, 200, 83);
-	private static final Color PBR_ERROR_COLOR = new Color(255, 255, 255);
+	// which on some setups render nearly identically, making the response
+	// hard to read at a glance. An earlier version of this used white for
+	// labels and green for rank, but both were nearly invisible against the
+	// game chatbox's default light/tan background - live screenshots showed
+	// the response was barely legible. Plain black matches every other line
+	// of chat text there, with only the rank number picking up a gold/
+	// silver/bronze medal color for the top 3 (same convention as
+	// BossesTab's leaderboard rank color), tuned dark enough to still read
+	// clearly on that light background.
+	private static final Color PBR_TEXT_COLOR = Color.BLACK;
+	private static final Color PBR_RANK_GOLD = new Color(184, 134, 11);
+	private static final Color PBR_RANK_SILVER = new Color(105, 105, 105);
+	private static final Color PBR_RANK_BRONZE = new Color(140, 83, 46);
+
+	private static Color pbrRankColor(int rank)
+	{
+		switch (rank)
+		{
+			case 1:
+				return PBR_RANK_GOLD;
+			case 2:
+				return PBR_RANK_SILVER;
+			case 3:
+				return PBR_RANK_BRONZE;
+			default:
+				return PBR_TEXT_COLOR;
+		}
+	}
 
 	// Matches the part of a synced boss key after the raid's bare prefix has
 	// been stripped, e.g. for "theatre of blood - hard - fastest overall (4
@@ -953,10 +973,10 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		String response = new ChatMessageBuilder()
-			.append(PBR_LABEL_COLOR, titleCase(match.boss) + " personal best: ")
-			.append(PBR_TIME_COLOR, formatTime(match.timeSeconds))
-			.append(PBR_LABEL_COLOR, "  Rank: ")
-			.append(PBR_RANK_COLOR, "#" + match.rank)
+			.append(PBR_TEXT_COLOR, titleCase(match.boss) + " personal best: ")
+			.append(PBR_TEXT_COLOR, formatTime(match.timeSeconds))
+			.append(PBR_TEXT_COLOR, "  Rank: ")
+			.append(pbrRankColor(match.rank), "#" + match.rank)
 			.build();
 
 		MessageNode messageNode = chatMessage.getMessageNode();
@@ -967,7 +987,7 @@ public class PbTrackerPlugin extends Plugin
 	private void respondPbr(ChatMessage chatMessage, String text)
 	{
 		String formatted = new ChatMessageBuilder()
-			.append(PBR_ERROR_COLOR, text)
+			.append(PBR_TEXT_COLOR, text)
 			.build();
 		MessageNode messageNode = chatMessage.getMessageNode();
 		messageNode.setRuneLiteFormatMessage(formatted);
