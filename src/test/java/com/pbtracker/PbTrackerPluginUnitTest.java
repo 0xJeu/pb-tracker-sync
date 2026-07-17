@@ -49,6 +49,15 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void dt2ScoreboardsDistinguishNormalAndAwakenedRecords()
+	{
+		assertEquals("Leviathan", PbTrackerPlugin.dt2ScoreboardBossKey("Leviathan", "Leviathan Statistics"));
+		assertEquals("Duke Sucellus (awakened)", PbTrackerPlugin.dt2ScoreboardBossKey(
+			"Duke Sucellus", "Duke Sucellus (Awakened) Statistics"));
+		assertNull(PbTrackerPlugin.dt2ScoreboardBossKey("Vardorvis", "Duke Sucellus Statistics"));
+	}
+
+	@Test
 	public void keepsNonRaidKeysThatContainDigits()
 	{
 		assertTrue(PbTrackerPlugin.shouldSyncRawPersonalBest("hallowed sepulchre floor 5"));
