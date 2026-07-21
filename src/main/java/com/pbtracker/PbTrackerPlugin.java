@@ -50,6 +50,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -99,6 +100,8 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SHOW_ROOM_VARIANTS_KEY = "showRoomVariants";
 	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+	private static final long LOGIN_SYNC_DELAY_SECONDS = 5;
+	private static final long AUTOMATIC_DUPLICATE_WINDOW_MILLIS = TimeUnit.SECONDS.toMillis(30);
 
 	// Matches any "Fastest <descriptor>: <value>" line on the Adventure Log
 	// Counters page, e.g. "Fastest kill: 3:34", "Fastest run: -",
@@ -280,6 +283,11 @@ public class PbTrackerPlugin extends Plugin
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private Dt2Scoreboard pendingDt2Scoreboard;
+	private final Object loginSyncLock = new Object();
+	private final LoginSyncSession loginSyncSession = new LoginSyncSession();
+	private ScheduledFuture<?> pendingLoginSync;
+	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
+		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -374,6 +382,7 @@ public class PbTrackerPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		resetLoginSyncSession();
 		chatCommandManager.unregisterCommand(PBR_COMMAND_STRING);
 		clientToolbar.removeNavigation(navButton);
 	}
@@ -395,22 +404,91 @@ public class PbTrackerPlugin extends Plugin
 		{
 			onLoggedIn();
 		}
-		else if (event.getGameState() == GameState.LOGIN_SCREEN && sidePanel != null)
+		else if (event.getGameState() == GameState.LOGIN_SCREEN
+			|| event.getGameState() == GameState.LOGIN_SCREEN_AUTHENTICATOR)
 		{
-			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
+			resetLoginSyncSession();
+			if (sidePanel != null)
+			{
+				javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
+			}
 		}
 	}
 
 	private void onLoggedIn()
 	{
-		accountHash = String.valueOf(client.getAccountHash());
+		String currentAccountHash = String.valueOf(client.getAccountHash());
+		accountHash = currentAccountHash;
 		if (config.syncOnLogin())
 		{
-			executor.schedule(this::syncAll, 5, TimeUnit.SECONDS);
+			scheduleLoginSync(currentAccountHash);
 		}
 		if (sidePanel != null)
 		{
 			loadLocalPlayerPanelWhenReady(0);
+		}
+	}
+
+	/**
+	 * RuneLite can publish LOGGED_IN more than once during a single account
+	 * session (plugin startup, world hops, reconnects, and ordinary loading
+	 * transitions all lead back to it). Mark the account as soon as its login
+	 * sync is scheduled so those repeated states cannot queue another full
+	 * payload. A different account replaces and cancels any still-pending job.
+	 */
+	private void scheduleLoginSync(String currentAccountHash)
+	{
+		synchronized (loginSyncLock)
+		{
+			long sessionId = loginSyncSession.markLoggedIn(currentAccountHash);
+			if (sessionId == LoginSyncSession.ALREADY_SCHEDULED)
+			{
+				return;
+			}
+
+			cancelPendingLoginSyncLocked();
+			pendingLoginSync = executor.schedule(
+				() -> runScheduledLoginSync(currentAccountHash, sessionId),
+				LOGIN_SYNC_DELAY_SECONDS,
+				TimeUnit.SECONDS);
+		}
+	}
+
+	private void runScheduledLoginSync(String scheduledAccountHash, long sessionId)
+	{
+		synchronized (loginSyncLock)
+		{
+			if (!loginSyncSession.isCurrent(scheduledAccountHash, sessionId))
+			{
+				return;
+			}
+			pendingLoginSync = null;
+		}
+
+		// Re-read the client hash before sending so a task that started racing
+		// with an account change can never upload under the previous account.
+		if (!scheduledAccountHash.equals(String.valueOf(client.getAccountHash())))
+		{
+			return;
+		}
+		syncAll(false);
+	}
+
+	private void resetLoginSyncSession()
+	{
+		synchronized (loginSyncLock)
+		{
+			loginSyncSession.reset();
+			cancelPendingLoginSyncLocked();
+		}
+	}
+
+	private void cancelPendingLoginSyncLocked()
+	{
+		if (pendingLoginSync != null)
+		{
+			pendingLoginSync.cancel(false);
+			pendingLoginSync = null;
 		}
 	}
 
@@ -516,7 +594,7 @@ public class PbTrackerPlugin extends Plugin
 			// actually stored, so there's nothing for the UI to get stale on.
 			if (SYNC_NOW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
-				executor.execute(this::syncAll);
+				executor.execute(() -> syncAll(true));
 			}
 			else if (DUMP_RAW_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
@@ -1343,7 +1421,7 @@ public class PbTrackerPlugin extends Plugin
 		}
 	}
 
-	private void syncAll()
+	private void syncAll(boolean force)
 	{
 		String profileKey = configManager.getRSProfileKey();
 		if (profileKey == null)
@@ -1388,8 +1466,7 @@ public class PbTrackerPlugin extends Plugin
 			return;
 		}
 
-		setStatus("Syncing " + pbs.size() + " PB(s)...");
-		syncPbs(pbs, unsyncedNote);
+		syncPbs(pbs, unsyncedNote, force, "Syncing " + pbs.size() + " PB(s)...");
 	}
 
 	/**
@@ -1527,12 +1604,12 @@ public class PbTrackerPlugin extends Plugin
 
 	private void syncPbs(Map<String, Double> pbs)
 	{
-		syncPbs(pbs, null);
+		syncPbs(pbs, null, false, null);
 	}
 
-	private void syncPbs(Map<String, Double> pbs, String statusNote)
+	private void syncPbs(Map<String, Double> pbs, String statusNote, boolean force, String startedStatus)
 	{
-		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		if (pbs.isEmpty() || client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
 		{
 			return;
 		}
@@ -1540,39 +1617,152 @@ public class PbTrackerPlugin extends Plugin
 		String name = client.getLocalPlayer().getName();
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
+		String fingerprint = force ? null : buildSyncFingerprint(hash, pbs);
 
-		syncClient.sync(hash, name, pbs, installSecret, new Callback()
+		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("PB sync failed", e);
-				setStatus("Sync failed: " + e.getMessage());
-			}
+			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
+			return;
+		}
+		if (startedStatus != null)
+		{
+			setStatus(startedStatus);
+		}
 
-			@Override
-			public void onResponse(Call call, Response response)
+		try
+		{
+			syncClient.sync(hash, name, pbs, installSecret, new Callback()
 			{
-				try
+				@Override
+				public void onFailure(Call call, IOException e)
 				{
-					if (response.isSuccessful())
+					if (fingerprint != null)
 					{
-						setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 					}
-					else if (response.code() == 409)
+					log.warn("PB sync failed", e);
+					setStatus("Sync failed: " + e.getMessage());
+				}
+
+				@Override
+				public void onResponse(Call call, Response response)
+				{
+					boolean successful = response.isSuccessful();
+					try
 					{
-						setStatus("Sync rejected: this account is already synced from a different install.");
+						if (successful)
+						{
+							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+						}
+						else if (response.code() == 409)
+						{
+							setStatus("Sync rejected: this account is already synced from a different install.");
+						}
+						else
+						{
+							setStatus("Server responded with error " + response.code());
+						}
 					}
-					else
+					finally
 					{
-						setStatus("Server responded with error " + response.code());
+						if (fingerprint != null)
+						{
+							automaticSyncDeduplicator.finish(fingerprint, successful, System.currentTimeMillis());
+						}
+						response.close();
 					}
 				}
-				finally
-				{
-					response.close();
-				}
+			});
+		}
+		catch (RuntimeException ex)
+		{
+			if (fingerprint != null)
+			{
+				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 			}
-		});
+			throw ex;
+		}
+	}
+
+	/**
+	 * Builds an order-independent identity for an exact account/PB payload.
+	 * Key lengths and the raw IEEE-754 value bits make each component
+	 * unambiguous without putting a secret or display name into the key.
+	 */
+	static String buildSyncFingerprint(String accountHash, Map<String, Double> pbs)
+	{
+		StringBuilder fingerprint = new StringBuilder(accountHash == null ? "" : accountHash).append('|');
+		for (Map.Entry<String, Double> entry : new TreeMap<>(pbs).entrySet())
+		{
+			String key = entry.getKey();
+			fingerprint.append(key.length())
+				.append(':')
+				.append(key)
+				.append('=')
+				.append(Long.toHexString(Double.doubleToLongBits(entry.getValue())))
+				.append(';');
+		}
+		return fingerprint.toString();
+	}
+
+	static final class LoginSyncSession
+	{
+		static final long ALREADY_SCHEDULED = -1;
+		private String accountHash;
+		private long sessionId;
+
+		long markLoggedIn(String currentAccountHash)
+		{
+			if (currentAccountHash.equals(accountHash))
+			{
+				return ALREADY_SCHEDULED;
+			}
+			accountHash = currentAccountHash;
+			return ++sessionId;
+		}
+
+		boolean isCurrent(String expectedAccountHash, long expectedSessionId)
+		{
+			return expectedSessionId == sessionId && expectedAccountHash.equals(accountHash);
+		}
+
+		void reset()
+		{
+			accountHash = null;
+			sessionId++;
+		}
+	}
+
+	static final class AutomaticSyncDeduplicator
+	{
+		private final long duplicateWindowMillis;
+		private final Set<String> inFlight = new HashSet<>();
+		private final Map<String, Long> recentlySuccessful = new HashMap<>();
+
+		AutomaticSyncDeduplicator(long duplicateWindowMillis)
+		{
+			this.duplicateWindowMillis = duplicateWindowMillis;
+		}
+
+		synchronized boolean tryStart(String fingerprint, long nowMillis)
+		{
+			recentlySuccessful.entrySet().removeIf(
+				entry -> nowMillis - entry.getValue() >= duplicateWindowMillis);
+			if (inFlight.contains(fingerprint) || recentlySuccessful.containsKey(fingerprint))
+			{
+				return false;
+			}
+			inFlight.add(fingerprint);
+			return true;
+		}
+
+		synchronized void finish(String fingerprint, boolean successful, long nowMillis)
+		{
+			inFlight.remove(fingerprint);
+			if (successful)
+			{
+				recentlySuccessful.put(fingerprint, nowMillis);
+			}
+		}
 	}
 }
