@@ -28,6 +28,94 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void repeatedLoggedInStatesOnlyScheduleOncePerAccountSession()
+	{
+		PbTrackerPlugin.LoginSyncSession session = new PbTrackerPlugin.LoginSyncSession();
+
+		long initialLogin = session.markLoggedIn("account-a");
+		assertTrue(initialLogin != PbTrackerPlugin.LoginSyncSession.ALREADY_SCHEDULED);
+		assertEquals(
+			PbTrackerPlugin.LoginSyncSession.ALREADY_SCHEDULED,
+			session.markLoggedIn("account-a"));
+		// A world hop or reconnect eventually publishes LOGGED_IN again for
+		// the same account; that is still the same sync session.
+		assertEquals(
+			PbTrackerPlugin.LoginSyncSession.ALREADY_SCHEDULED,
+			session.markLoggedIn("account-a"));
+		assertTrue(session.isCurrent("account-a", initialLogin));
+	}
+
+	@Test
+	public void logoutStartsANewLoginSyncSessionEvenForTheSameAccount()
+	{
+		PbTrackerPlugin.LoginSyncSession session = new PbTrackerPlugin.LoginSyncSession();
+		long firstSession = session.markLoggedIn("account-a");
+
+		session.reset();
+
+		assertFalse(session.isCurrent("account-a", firstSession));
+		long secondSession = session.markLoggedIn("account-a");
+		assertTrue(secondSession != PbTrackerPlugin.LoginSyncSession.ALREADY_SCHEDULED);
+		assertFalse(firstSession == secondSession);
+		assertTrue(session.isCurrent("account-a", secondSession));
+	}
+
+	@Test
+	public void accountChangeInvalidatesThePreviouslyScheduledLoginSync()
+	{
+		PbTrackerPlugin.LoginSyncSession session = new PbTrackerPlugin.LoginSyncSession();
+		long firstSession = session.markLoggedIn("account-a");
+		long secondSession = session.markLoggedIn("account-b");
+
+		assertFalse(session.isCurrent("account-a", firstSession));
+		assertTrue(session.isCurrent("account-b", secondSession));
+	}
+
+	@Test
+	public void syncFingerprintIsIndependentOfMapIterationOrder()
+	{
+		Map<String, Double> first = new LinkedHashMap<>();
+		first.put("zulrah", 41.2);
+		first.put("cerberus", 61.0);
+		Map<String, Double> second = new LinkedHashMap<>();
+		second.put("cerberus", 61.0);
+		second.put("zulrah", 41.2);
+
+		assertEquals(
+			PbTrackerPlugin.buildSyncFingerprint("account-a", first),
+			PbTrackerPlugin.buildSyncFingerprint("account-a", second));
+		assertFalse(
+			PbTrackerPlugin.buildSyncFingerprint("account-a", first).equals(
+				PbTrackerPlugin.buildSyncFingerprint("account-b", second)));
+		second.put("zulrah", 40.9);
+		assertFalse(
+			PbTrackerPlugin.buildSyncFingerprint("account-a", first).equals(
+				PbTrackerPlugin.buildSyncFingerprint("account-a", second)));
+	}
+
+	@Test
+	public void automaticSyncDeduplicatorBlocksInflightAndRecentSuccessfulPayloads()
+	{
+		PbTrackerPlugin.AutomaticSyncDeduplicator deduplicator =
+			new PbTrackerPlugin.AutomaticSyncDeduplicator(30_000);
+
+		assertTrue(deduplicator.tryStart("same-payload", 1_000));
+		assertFalse(deduplicator.tryStart("same-payload", 1_001));
+		assertTrue(deduplicator.tryStart("new-pb-payload", 1_001));
+		deduplicator.finish("new-pb-payload", true, 1_001);
+
+		// A failure releases the payload immediately so a real retry can run.
+		deduplicator.finish("same-payload", false, 1_002);
+		assertTrue(deduplicator.tryStart("same-payload", 1_003));
+
+		// A successful identical automatic send is quiet for the bounded
+		// duplicate window, then becomes eligible again.
+		deduplicator.finish("same-payload", true, 1_004);
+		assertFalse(deduplicator.tryStart("same-payload", 31_003));
+		assertTrue(deduplicator.tryStart("same-payload", 31_004));
+	}
+
+	@Test
 	public void canonicalizesAwakenedDt2RawKeys()
 	{
 		assertEquals("Duke Sucellus (awakened)", PbTrackerPlugin.canonicalBossKey("duke sucellus awakened"));
