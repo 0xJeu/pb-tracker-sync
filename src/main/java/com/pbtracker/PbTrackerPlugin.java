@@ -288,6 +288,8 @@ public class PbTrackerPlugin extends Plugin
 	private ScheduledFuture<?> pendingLoginSync;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
+	private final InstallRecoveryCircuitBreaker installRecoveryCircuitBreaker =
+		new InstallRecoveryCircuitBreaker();
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -383,6 +385,7 @@ public class PbTrackerPlugin extends Plugin
 	protected void shutDown()
 	{
 		resetLoginSyncSession();
+		installRecoveryCircuitBreaker.clear();
 		chatCommandManager.unregisterCommand(PBR_COMMAND_STRING);
 		clientToolbar.removeNavigation(navButton);
 	}
@@ -1617,12 +1620,26 @@ public class PbTrackerPlugin extends Plugin
 		String name = client.getLocalPlayer().getName();
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
-		String fingerprint = force ? null : buildSyncFingerprint(hash, pbs);
+		String fingerprint = usesAutomaticSyncGuards(force) ? buildSyncFingerprint(hash, pbs) : null;
 
 		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
 			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
 			return;
+		}
+		if (fingerprint != null)
+		{
+			InstallRecoveryCircuitBreaker.AttemptDecision decision =
+				installRecoveryCircuitBreaker.beginAutomaticAttempt(hash, System.currentTimeMillis());
+			if (!decision.allowed)
+			{
+				// The deduplicator claimed this payload before the recovery gate
+				// was checked. Release it as unsuccessful so a later permitted
+				// recovery probe is never mistaken for an in-flight/successful send.
+				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+				setStatus(formatInstallRecoveryStatus(decision.response));
+				return;
+			}
 		}
 		if (startedStatus != null)
 		{
@@ -1639,6 +1656,7 @@ public class PbTrackerPlugin extends Plugin
 					if (fingerprint != null)
 					{
 						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+						installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
 					}
 					log.warn("PB sync failed", e);
 					setStatus("Sync failed: " + e.getMessage());
@@ -1652,14 +1670,21 @@ public class PbTrackerPlugin extends Plugin
 					{
 						if (successful)
 						{
+							installRecoveryCircuitBreaker.recordSuccess(hash);
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
 						}
 						else if (response.code() == 409)
 						{
-							setStatus("Sync rejected: this account is already synced from a different install.");
+							SyncClient.SyncErrorResponse syncError = syncClient.parseSyncErrorResponse(response);
+							installRecoveryCircuitBreaker.recordMismatch(hash, syncError, System.currentTimeMillis());
+							setStatus(formatInstallRecoveryStatus(syncError));
 						}
 						else
 						{
+							if (fingerprint != null)
+							{
+								installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+							}
 							setStatus("Server responded with error " + response.code());
 						}
 					}
@@ -1679,9 +1704,44 @@ public class PbTrackerPlugin extends Plugin
 			if (fingerprint != null)
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+				installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
 			}
 			throw ex;
 		}
+	}
+
+	static boolean usesAutomaticSyncGuards(boolean force)
+	{
+		return !force;
+	}
+
+	static String formatInstallRecoveryStatus(SyncClient.SyncErrorResponse response)
+	{
+		String status;
+		switch (response.code)
+		{
+			case "RECOVERY_PENDING":
+				status = "Install recovery pending";
+				break;
+			case "RECOVERY_CONTESTED":
+				status = "Install recovery needs review";
+				break;
+			case "RECOVERY_REJECTED":
+				status = "Install recovery was rejected";
+				break;
+			default:
+				status = "Sync blocked: install credential mismatch";
+		}
+
+		if (response.recoveryId != null)
+		{
+			status += " (#" + response.recoveryId + ")";
+		}
+		if ("RECOVERY_PENDING".equals(response.code) && response.retryAfterSeconds != null)
+		{
+			return status + ". Automatic sync paused for " + response.retryAfterSeconds + " seconds.";
+		}
+		return status + ". Automatic sync paused for this client session.";
 	}
 
 	/**

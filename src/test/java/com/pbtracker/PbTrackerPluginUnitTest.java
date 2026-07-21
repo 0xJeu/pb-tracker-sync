@@ -28,6 +28,13 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void manualSyncBypassesAllAutomaticGuards()
+	{
+		assertFalse(PbTrackerPlugin.usesAutomaticSyncGuards(true));
+		assertTrue(PbTrackerPlugin.usesAutomaticSyncGuards(false));
+	}
+
+	@Test
 	public void repeatedLoggedInStatesOnlyScheduleOncePerAccountSession()
 	{
 		PbTrackerPlugin.LoginSyncSession session = new PbTrackerPlugin.LoginSyncSession();
