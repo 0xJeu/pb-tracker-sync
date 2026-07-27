@@ -288,6 +288,7 @@ public class PbTrackerPlugin extends Plugin
 	private ScheduledFuture<?> pendingLoginSync;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
+	private final LocalProfileLoadCoordinator localProfileLoadCoordinator = new LocalProfileLoadCoordinator();
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -408,6 +409,7 @@ public class PbTrackerPlugin extends Plugin
 			|| event.getGameState() == GameState.LOGIN_SCREEN_AUTHENTICATOR)
 		{
 			resetLoginSyncSession();
+			localProfileLoadCoordinator.reset();
 			if (sidePanel != null)
 			{
 				javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
@@ -425,7 +427,7 @@ public class PbTrackerPlugin extends Plugin
 		}
 		if (sidePanel != null)
 		{
-			loadLocalPlayerPanelWhenReady(0);
+			loadLocalPlayerPanelWhenReady(0, currentAccountHash);
 		}
 	}
 
@@ -492,7 +494,7 @@ public class PbTrackerPlugin extends Plugin
 		}
 	}
 
-	private void loadLocalPlayerPanelWhenReady(int attempt)
+	private void loadLocalPlayerPanelWhenReady(int attempt, String forAccountHash)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
@@ -502,13 +504,20 @@ public class PbTrackerPlugin extends Plugin
 		if (localPlayer != null && localPlayer.getName() != null)
 		{
 			String displayName = localPlayer.getName();
+			LocalProfileLoadCoordinator.Decision decision =
+				localProfileLoadCoordinator.onLoginState(forAccountHash, displayName, System.currentTimeMillis());
+			if (decision != LocalProfileLoadCoordinator.Decision.LOAD)
+			{
+				log.debug("Skipping My PBs sidebar load for {}: {}", displayName, decision);
+				return;
+			}
 			log.debug("Loading My PBs sidebar for {} on attempt {}", displayName, attempt + 1);
 			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(displayName));
 			return;
 		}
 		if (attempt < 4)
 		{
-			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1), 1, TimeUnit.SECONDS);
+			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1, forAccountHash), 1, TimeUnit.SECONDS);
 		}
 	}
 
