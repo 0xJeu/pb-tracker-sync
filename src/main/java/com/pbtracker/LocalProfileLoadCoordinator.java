@@ -1,5 +1,7 @@
 package com.pbtracker;
 
+import java.util.Objects;
+
 /**
  * Decides whether the "My PBs" sidebar should issue a fresh
  * GET /api/players/:name lookup, independent of the syncOnLogin-gated
@@ -32,7 +34,7 @@ class LocalProfileLoadCoordinator
 	synchronized Decision onLoginState(String currentAccountHash, String displayName, long nowMillis)
 	{
 		String normalized = normalize(displayName);
-		boolean sameSession = currentAccountHash.equals(accountHash) && normalized.equals(normalizedDisplayName);
+		boolean sameSession = isSameSession(currentAccountHash, normalized);
 
 		if (!sameSession)
 		{
@@ -58,19 +60,23 @@ class LocalProfileLoadCoordinator
 
 	/**
 	 * Called by the explicit "Refresh My PBs" action. Bypasses the
-	 * loaded-session cache but still coalesces a concurrent in-flight request.
+	 * loaded-session cache and the error backoff, but still coalesces a
+	 * concurrent in-flight request for the same session.
 	 */
 	synchronized Decision onManualRefresh(String currentAccountHash, String displayName)
 	{
 		String normalized = normalize(displayName);
-		boolean sameSession = currentAccountHash.equals(accountHash) && normalized.equals(normalizedDisplayName);
+		boolean sameSession = isSameSession(currentAccountHash, normalized);
 		if (sameSession && inFlight)
 		{
 			return Decision.SKIP_IN_FLIGHT;
 		}
 
-		accountHash = currentAccountHash;
-		normalizedDisplayName = normalized;
+		if (!sameSession)
+		{
+			startNewSession(currentAccountHash, normalized);
+		}
+
 		inFlight = true;
 		return Decision.LOAD;
 	}
@@ -110,6 +116,12 @@ class LocalProfileLoadCoordinator
 		this.inFlight = false;
 		this.loaded = false;
 		this.lastFailureAtMillis = -1;
+	}
+
+	private boolean isSameSession(String currentAccountHash, String normalizedDisplayName)
+	{
+		return Objects.equals(currentAccountHash, accountHash)
+			&& Objects.equals(normalizedDisplayName, this.normalizedDisplayName);
 	}
 
 	private static String normalize(String displayName)

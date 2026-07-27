@@ -106,6 +106,35 @@ public class LocalProfileLoadCoordinatorTest
 	}
 
 	@Test
+	public void manualRefreshForADifferentSessionDoesNotLeakStaleLoadedOrBackoffState()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+		coordinator.markLoaded();
+		coordinator.markError(1_000L); // simulate a stale backoff timestamp left on the old session
+
+		// Manual refresh for a different account should not be blocked by the
+		// old session's loaded/backoff state, and should not carry that state
+		// forward into the new session either.
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onManualRefresh("acct-b", "AltAccount"));
+
+		// The new session should behave like a freshly tracked one: a
+		// concurrent manual refresh for it coalesces...
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_IN_FLIGHT,
+			coordinator.onManualRefresh("acct-b", "AltAccount"));
+
+		// ...and once it completes, no stale loaded=true or backoff timestamp
+		// from acct-a should cause onLoginState to skip a subsequent load.
+		coordinator.markError(1_500L);
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-b", "AltAccount", 100_000L));
+	}
+
+	@Test
 	public void logoutClearsTheSessionAndPermitsANewLoadOnNextLogin()
 	{
 		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
