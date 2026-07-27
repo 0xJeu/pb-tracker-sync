@@ -103,7 +103,10 @@ class MyPbsTab extends JPanel
 			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(displayName);
 			SwingUtilities.invokeLater(() ->
 			{
-				inFlightDisplayName = null;
+				if (normalized.equals(inFlightDisplayName))
+				{
+					inFlightDisplayName = null;
+				}
 				if (request != requestGeneration)
 				{
 					return;
@@ -141,6 +144,7 @@ class MyPbsTab extends JPanel
 	void showLoggedOut()
 	{
 		requestGeneration++;
+		inFlightDisplayName = null;
 		currentDisplayName = null;
 		listPanel.showMessage("Log in to see your PBs.");
 	}
