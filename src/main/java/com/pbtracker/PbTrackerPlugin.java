@@ -1668,6 +1668,15 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
+							if (outcome.updated != null && outcome.updated > 0)
+							{
+								localProfileLoadCoordinator.markStaleAfterChangedSync();
+								if (sidePanel != null)
+								{
+									loadLocalPlayerPanelWhenReady(0, hash);
+								}
+							}
 						}
 						else if (response.code() == 409)
 						{
