@@ -38,14 +38,14 @@ class PbTrackerSidePanel extends PluginPanel
 	private final JPanel backBar = new JPanel(new BorderLayout());
 	private Component previousTab;
 
-	PbTrackerSidePanel(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config)
+	PbTrackerSidePanel(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, LocalProfileLoadCoordinator localProfileLoadCoordinator)
 	{
 		super(false);
 		setBackground(PbTrackerTheme.BG);
 		setLayout(new BorderLayout());
 
 		bossesTab = new BossesTab(syncClient, spriteManager, this::jumpToSearch);
-		myPbsTab = new MyPbsTab(syncClient, spriteManager, config, this::jumpToBoss);
+		myPbsTab = new MyPbsTab(syncClient, spriteManager, config, this::jumpToBoss, localProfileLoadCoordinator);
 		searchTab = new PlayerSearchTab(syncClient, spriteManager, config, this::jumpToBoss);
 
 		tabs.setBackground(PbTrackerTheme.BG);

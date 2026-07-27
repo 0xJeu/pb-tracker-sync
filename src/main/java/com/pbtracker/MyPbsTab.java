@@ -26,14 +26,17 @@ class MyPbsTab extends JPanel
 	private final PbListPanel listPanel;
 	private final JScrollPane scrollPane;
 	private final JLabel viewOnWebsiteButton;
+	private final LocalProfileLoadCoordinator localProfileLoadCoordinator;
 	private long requestGeneration;
+	private volatile String inFlightDisplayName;
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
+		this.localProfileLoadCoordinator = localProfileLoadCoordinator;
 		this.listPanel = new PbListPanel(spriteManager, config);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
@@ -81,6 +84,17 @@ class MyPbsTab extends JPanel
 	/** Called on login (and whenever the panel is (re)opened) with the local player's name. */
 	void load(String displayName)
 	{
+		String normalized = displayName == null ? "" : displayName.trim().toLowerCase();
+		if (normalized.equals(inFlightDisplayName))
+		{
+			// Coordinator-level gating (Task 2) already prevents most
+			// duplicate calls; this is a direct guard against any other
+			// caller re-entering load() for the same name while a lookup
+			// thread is still running.
+			return;
+		}
+		inFlightDisplayName = normalized;
+
 		currentDisplayName = displayName;
 		listPanel.showMessage("Loading...");
 		long request = ++requestGeneration;
@@ -89,6 +103,7 @@ class MyPbsTab extends JPanel
 			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(displayName);
 			SwingUtilities.invokeLater(() ->
 			{
+				inFlightDisplayName = null;
 				if (request != requestGeneration)
 				{
 					return;
@@ -98,16 +113,20 @@ class MyPbsTab extends JPanel
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
 						scrollToTop();
+						localProfileLoadCoordinator.markLoaded();
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found yet - sync with the plugin first.");
+						localProfileLoadCoordinator.markLoaded();
 						break;
 					case AMBIGUOUS:
 						listPanel.showMessage("Multiple synced accounts share this name - check the website directly.");
+						localProfileLoadCoordinator.markLoaded();
 						break;
 					case ERROR:
 					default:
 						listPanel.showMessage("Lookup failed - try again later.");
+						localProfileLoadCoordinator.markError(System.currentTimeMillis());
 						break;
 				}
 			});
