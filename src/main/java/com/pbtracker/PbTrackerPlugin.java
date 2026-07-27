@@ -500,6 +500,12 @@ public class PbTrackerPlugin extends Plugin
 		{
 			return;
 		}
+		// Re-read the client hash before acting so a retry that started racing
+		// with an account change can never load or dedup under the previous account.
+		if (!forAccountHash.equals(String.valueOf(client.getAccountHash())))
+		{
+			return;
+		}
 		Player localPlayer = client.getLocalPlayer();
 		if (localPlayer != null && localPlayer.getName() != null)
 		{
