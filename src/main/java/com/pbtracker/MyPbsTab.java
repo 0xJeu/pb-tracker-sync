@@ -42,7 +42,11 @@ class MyPbsTab extends JPanel
 		setBackground(PbTrackerTheme.BG);
 
 		viewOnWebsiteButton = buildViewOnWebsiteButton();
-		add(viewOnWebsiteButton, BorderLayout.NORTH);
+		JPanel header = new JPanel(new BorderLayout());
+		header.setOpaque(false);
+		header.add(viewOnWebsiteButton, BorderLayout.NORTH);
+		header.add(buildRefreshButton(), BorderLayout.SOUTH);
+		add(header, BorderLayout.NORTH);
 
 		scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
@@ -72,6 +76,18 @@ class MyPbsTab extends JPanel
 				LinkBrowser.browse(PbTrackerPlugin.buildProfileUrl(currentDisplayName));
 			}
 		});
+		return button;
+	}
+
+	private JLabel buildRefreshButton()
+	{
+		JLabel button = new JLabel("Refresh My PBs", SwingConstants.CENTER);
+		button.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		button.setFont(FontManager.getRunescapeSmallFont());
+		button.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
+		button.setOpaque(true);
+		button.setBackground(PbTrackerTheme.PANEL);
+		PbTrackerPlugin.addRowClickListener(button, this::refresh);
 		return button;
 	}
 
@@ -134,6 +150,16 @@ class MyPbsTab extends JPanel
 				}
 			});
 		}, "pbtracker-mypbs-lookup").start();
+	}
+
+	/** Bypasses the coordinator's "already loaded this session" cache but still coalesces a concurrent refresh via the same in-flight guard as load(). */
+	void refresh()
+	{
+		if (currentDisplayName == null)
+		{
+			return;
+		}
+		load(currentDisplayName);
 	}
 
 	private void scrollToTop()
