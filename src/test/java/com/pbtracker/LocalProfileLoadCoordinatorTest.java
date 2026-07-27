@@ -175,4 +175,23 @@ public class LocalProfileLoadCoordinatorTest
 			LocalProfileLoadCoordinator.Decision.SKIP_ALREADY_LOADED,
 			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
 	}
+
+	@Test
+	public void changedSyncArrivingMidLoadIsNotSwallowedByThatLoadCompleting()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		// An unrelated lookup is already in flight (e.g. a world hop retry)...
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+
+		// ...and a changed-data sync's onResponse fires while it's still in flight.
+		coordinator.markStaleAfterChangedSync();
+
+		// The unrelated in-flight lookup now completes. Without pendingRefresh,
+		// this would set loaded=true and permanently mask the missed refresh.
+		coordinator.markLoaded();
+
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
+	}
 }

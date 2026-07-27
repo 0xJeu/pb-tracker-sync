@@ -28,6 +28,7 @@ class LocalProfileLoadCoordinator
 	private String normalizedDisplayName;
 	private boolean inFlight;
 	private boolean loaded;
+	private boolean pendingRefresh;
 	private long lastFailureAtMillis = -1;
 
 	/** Called for every LOGGED_IN state the plugin observes. */
@@ -84,19 +85,41 @@ class LocalProfileLoadCoordinator
 	synchronized void markLoaded()
 	{
 		inFlight = false;
-		loaded = true;
+		if (pendingRefresh)
+		{
+			pendingRefresh = false;
+			loaded = false;
+		}
+		else
+		{
+			loaded = true;
+		}
 	}
 
 	synchronized void markError(long nowMillis)
 	{
 		inFlight = false;
 		lastFailureAtMillis = nowMillis;
+		pendingRefresh = false;
 	}
 
-	/** A successful sync that changed PB data invalidates the loaded session result once. */
+	/**
+	 * A successful sync that changed PB data invalidates the loaded session
+	 * result once. If a lookup is already in flight, deferred via
+	 * pendingRefresh instead of clearing loaded directly - otherwise that
+	 * unrelated in-flight lookup's own markLoaded() would stomp loaded back
+	 * to true and silently swallow this refresh for the rest of the session.
+	 */
 	synchronized void markStaleAfterChangedSync()
 	{
-		loaded = false;
+		if (inFlight)
+		{
+			pendingRefresh = true;
+		}
+		else
+		{
+			loaded = false;
+		}
 	}
 
 	/** Logout / login-screen state: cancel any pending retry and clear the session entirely. */
@@ -106,6 +129,7 @@ class LocalProfileLoadCoordinator
 		normalizedDisplayName = null;
 		inFlight = false;
 		loaded = false;
+		pendingRefresh = false;
 		lastFailureAtMillis = -1;
 	}
 
@@ -115,6 +139,7 @@ class LocalProfileLoadCoordinator
 		this.normalizedDisplayName = normalizedDisplayName;
 		this.inFlight = false;
 		this.loaded = false;
+		this.pendingRefresh = false;
 		this.lastFailureAtMillis = -1;
 	}
 
