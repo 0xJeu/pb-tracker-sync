@@ -91,4 +91,23 @@ public class PersistedFingerprintStoreTest
 		PersistedFingerprintStore store = new PersistedFingerprintStore(raw);
 		assertFalse(store.matches("acct-a", "fingerprint-1"));
 	}
+
+	@Test
+	public void simulatesAnUnchangedFingerprintSurvivingARestart()
+	{
+		PersistedFingerprintStore.ConfigStore sharedBackingStore = new FakeConfigStore();
+
+		// First "session"
+		PersistedFingerprintStore sessionOne = new PersistedFingerprintStore(sharedBackingStore);
+		String fingerprint = "some-64-char-fingerprint-stand-in";
+		sessionOne.record("acct-a", fingerprint);
+
+		// Simulated RuneLite restart: a brand new PersistedFingerprintStore
+		// instance, but backed by the same persisted config values (this is
+		// what real RuneLite does - ConfigManager's storage outlives the
+		// plugin object across a restart, only the plugin's own in-memory
+		// state, including automaticSyncDeduplicator, is lost).
+		PersistedFingerprintStore sessionTwo = new PersistedFingerprintStore(sharedBackingStore);
+		assertTrue(sessionTwo.matches("acct-a", fingerprint));
+	}
 }
