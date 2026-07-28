@@ -76,13 +76,18 @@ public class PersistedFingerprintStoreTest
 	}
 
 	@Test
-	public void failsOpenOnAnUnparseableStoredValue()
+	public void failsOpenOnAValueWrittenByAFutureSchemaVersion()
 	{
-		PersistedFingerprintStore.ConfigStore raw = new FakeConfigStore();
-		// Simulate a corrupted or future-schema-version value that this
-		// version of the plugin can't parse - matches() must return false
-		// (fail open: sync normally) rather than throw.
-		raw.set(PersistedFingerprintStore.configKeyFor("acct-a"), "not-valid-json-or-schema");
+		FakeConfigStore raw = new FakeConfigStore();
+		// Simulate what a hypothetical future v2 codebase would have
+		// written, stashed directly under a raw "v2" key (bypassing
+		// today's configKeyFor, which is pinned to v1). A
+		// PersistedFingerprintStore built against today's code looks under
+		// the v1-prefixed key, won't find this, and must fail open (return
+		// false, i.e. sync normally) rather than misreading a differently
+		// shaped value - this is the actual cross-version isolation
+		// property the versioned key prefix exists to provide.
+		raw.set("syncFingerprint.v2.acct-a", "fingerprint-1");
 		PersistedFingerprintStore store = new PersistedFingerprintStore(raw);
 		assertFalse(store.matches("acct-a", "fingerprint-1"));
 	}

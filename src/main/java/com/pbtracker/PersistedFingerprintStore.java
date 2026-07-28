@@ -1,5 +1,7 @@
 package com.pbtracker;
 
+import java.util.Objects;
+
 /**
  * Persists the last successful automatic-sync SyncFingerprint per account,
  * so an unchanged payload doesn't repeat the POST across RuneLite restarts
@@ -9,8 +11,17 @@ package com.pbtracker;
  * Stores through a small ConfigStore seam instead of RuneLite's real
  * ConfigManager directly, so this decision logic is unit-testable without
  * timing or mocking real RuneLite infrastructure.
+ * <p>
+ * Not atomic: {@link #matches} and {@link #record} are independent calls
+ * against the underlying ConfigStore, so a caller doing
+ * "check matches(), sync if false, then record()" from two racing threads
+ * (e.g. a UI-triggered manual sync racing an automatic sync callback) could
+ * interleave. This class has no internal mutable state of its own to
+ * protect - configStore is the only field and it's final - so it adds no
+ * locking; a caller that needs the check-then-act sequence to be atomic
+ * must synchronize around its own call site.
  */
-class PersistedFingerprintStore
+final class PersistedFingerprintStore
 {
 	private static final String KEY_PREFIX = "syncFingerprint.v1.";
 
@@ -33,6 +44,13 @@ class PersistedFingerprintStore
 
 	static String configKeyFor(String accountHash)
 	{
+		// Unlike SyncFingerprint.compute (which normalizes a null
+		// accountHash to "" since it must always produce some digest), this
+		// class's whole purpose is being an unambiguous key store keyed BY
+		// account - a null here would silently collide every caller that
+		// passes one under the literal key "syncFingerprint.v1.null", so
+		// fail loudly instead.
+		Objects.requireNonNull(accountHash, "accountHash");
 		// accountHash is itself an opaque numeric-ish identifier (not a
 		// secret, not a display name), safe to use directly as a config key
 		// suffix - matches how the rest of this plugin already treats it
