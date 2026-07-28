@@ -288,6 +288,27 @@ public class PbTrackerPlugin extends Plugin
 	private ScheduledFuture<?> pendingLoginSync;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
+	private final PersistedFingerprintStore persistedFingerprintStore =
+		new PersistedFingerprintStore(new PersistedFingerprintStore.ConfigStore()
+		{
+			@Override
+			public String get(String key)
+			{
+				return configManager.getConfiguration(SETTINGS_GROUP, key);
+			}
+
+			@Override
+			public void set(String key, String value)
+			{
+				configManager.setConfiguration(SETTINGS_GROUP, key, value);
+			}
+
+			@Override
+			public void unset(String key)
+			{
+				configManager.unsetConfiguration(SETTINGS_GROUP, key);
+			}
+		});
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -1618,10 +1639,21 @@ public class PbTrackerPlugin extends Plugin
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
 		String fingerprint = force ? null : buildSyncFingerprint(hash, pbs);
+		String persistedFingerprint = force ? null : SyncFingerprint.compute(hash, name, pbs);
 
 		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
 			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
+			return;
+		}
+		if (persistedFingerprint != null && persistedFingerprintStore.matches(hash, persistedFingerprint))
+		{
+			log.debug("Skipping automatic PB sync for {} PB(s): unchanged since last successful sync", pbs.size());
+			if (fingerprint != null)
+			{
+				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+			}
+			setStatus("No PB changes since last successful sync" + suffix);
 			return;
 		}
 		if (startedStatus != null)
@@ -1653,6 +1685,10 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+							String fingerprintToRecord = persistedFingerprint != null
+								? persistedFingerprint
+								: SyncFingerprint.compute(hash, name, pbs);
+							persistedFingerprintStore.record(hash, fingerprintToRecord);
 						}
 						else if (response.code() == 409)
 						{
