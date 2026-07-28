@@ -1669,7 +1669,7 @@ public class PbTrackerPlugin extends Plugin
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
 							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
-							if (outcome.updated != null && outcome.updated > 0)
+							if (hash.equals(accountHash) && shouldRefreshLocalProfileAfterSync(outcome))
 							{
 								localProfileLoadCoordinator.markStaleAfterChangedSync();
 								if (sidePanel != null)
@@ -1706,6 +1706,18 @@ public class PbTrackerPlugin extends Plugin
 			}
 			throw ex;
 		}
+	}
+
+	/**
+	 * A successful sync can change player metadata even when no PB row was
+	 * inserted or improved. In particular, the backend updates display names
+	 * independently of its {@code updated} PB counter, so a zero-count result
+	 * still needs to invalidate a lookup that may have returned NOT_FOUND
+	 * under the player's new name.
+	 */
+	static boolean shouldRefreshLocalProfileAfterSync(SyncClient.SyncResponseDto outcome)
+	{
+		return outcome != null && outcome.updated != null && outcome.updated >= 0;
 	}
 
 	/**

@@ -72,6 +72,22 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void successfulSyncWithNoPbUpdatesStillRefreshesLocalProfile()
+	{
+		SyncClient.SyncResponseDto outcome = new SyncClient.SyncResponseDto();
+		outcome.updated = 0;
+
+		assertTrue(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(outcome));
+	}
+
+	@Test
+	public void malformedSyncResponseDoesNotRefreshLocalProfile()
+	{
+		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(new SyncClient.SyncResponseDto()));
+		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(null));
+	}
+
+	@Test
 	public void syncFingerprintIsIndependentOfMapIterationOrder()
 	{
 		Map<String, Double> first = new LinkedHashMap<>();
