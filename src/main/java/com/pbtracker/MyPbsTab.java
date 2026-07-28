@@ -13,6 +13,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /**
  * "My PBs" tab - auto-loads the logged-in player's own synced PBs, no typing
@@ -27,13 +28,13 @@ class MyPbsTab extends JPanel
 	private final JScrollPane scrollPane;
 	private final JLabel viewOnWebsiteButton;
 	private final LocalProfileLoadCoordinator localProfileLoadCoordinator;
-	private final java.util.function.Supplier<String> accountHashSupplier;
+	private final Supplier<String> accountHashSupplier;
 	private long requestGeneration;
 	private volatile String inFlightDisplayName;
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator, java.util.function.Supplier<String> accountHashSupplier)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator, Supplier<String> accountHashSupplier)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;

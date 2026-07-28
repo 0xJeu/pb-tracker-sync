@@ -279,7 +279,7 @@ public class PbTrackerPlugin extends Plugin
 	private PbTrackerSidePanel sidePanel;
 	private net.runelite.client.ui.NavigationButton navButton;
 
-	private String accountHash;
+	private volatile String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private Dt2Scoreboard pendingDt2Scoreboard;

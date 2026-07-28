@@ -190,11 +190,24 @@ public class LocalProfileLoadCoordinatorTest
 
 		// The unrelated in-flight lookup now completes. Without pendingRefresh,
 		// this would set loaded=true and permanently mask the missed refresh.
-		coordinator.markLoaded();
-
+		// A refresh is still owed, so markLoaded() reports true and inFlight
+		// stays held - the caller (MyPbsTab) is required to immediately
+		// retry with a new load rather than the coordinator relying on some
+		// later onLoginState to notice. A login state re-check right now
+		// must therefore see SKIP_IN_FLIGHT, not LOAD - the retry itself is
+		// the mechanism that isn't swallowed, not a fresh onLoginState LOAD.
+		assertTrue(coordinator.markLoaded());
 		assertEquals(
-			LocalProfileLoadCoordinator.Decision.LOAD,
+			LocalProfileLoadCoordinator.Decision.SKIP_IN_FLIGHT,
 			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
+
+		// The retry itself now completes with nothing further pending -
+		// proof the changed sync's refresh was genuinely serviced, not
+		// dropped, is that the session settles into loaded=true here.
+		assertFalse(coordinator.markLoaded());
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_ALREADY_LOADED,
+			coordinator.onLoginState("acct-a", "Zezima", 3_000L));
 	}
 
 	@Test
@@ -247,5 +260,48 @@ public class LocalProfileLoadCoordinatorTest
 		assertEquals(
 			LocalProfileLoadCoordinator.Decision.LOAD,
 			coordinator.onLoginState("acct-a", "Zezima", 31_100L));
+	}
+
+	@Test
+	public void aSecondChangedSyncArrivingDuringTheRetryWindowIsStillDeferredNotDropped()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+
+		// Load A starts (inFlight = true).
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-a", "Zezima", 1_000L));
+
+		// Changed sync #1 lands while A is in flight - deferred via pendingRefresh.
+		coordinator.markStaleAfterChangedSync();
+
+		// Load A completes: a refresh is still owed, so the caller retries
+		// immediately with load B. inFlight must stay true across that
+		// hand-off, since B is a real in-progress fetch from the
+		// coordinator's point of view, not a fresh, idle session.
+		assertTrue(coordinator.markLoaded());
+
+		// Proof inFlight is still held: a login state re-check right now
+		// (as would happen from an unrelated world hop firing mid-retry)
+		// must see SKIP_IN_FLIGHT, not LOAD - if inFlight had been wrongly
+		// cleared already, this would incorrectly return LOAD and schedule
+		// a second, redundant lookup on top of retry B.
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_IN_FLIGHT,
+			coordinator.onLoginState("acct-a", "Zezima", 1_100L));
+
+		// Changed sync #2 lands while retry B is in flight. Since inFlight
+		// is (correctly) still true, this must take the pendingRefresh
+		// branch again rather than clearing loaded directly.
+		coordinator.markStaleAfterChangedSync();
+
+		// Load B completes: proof sync #2 wasn't silently dropped is that
+		// markLoaded() reports a refresh is owed a second time, triggering
+		// yet another retry rather than settling into loaded=true.
+		assertTrue(coordinator.markLoaded());
+
+		// Finally, retry C (for sync #2) completes with nothing further
+		// pending, and the session settles into a genuinely loaded state.
+		assertFalse(coordinator.markLoaded());
 	}
 }

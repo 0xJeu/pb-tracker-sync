@@ -10,6 +10,7 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.util.function.Supplier;
 
 /**
  * Root side panel: three tabs (My PBs / Player Search / Bosses), matching
@@ -38,7 +39,7 @@ class PbTrackerSidePanel extends PluginPanel
 	private final JPanel backBar = new JPanel(new BorderLayout());
 	private Component previousTab;
 
-	PbTrackerSidePanel(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, LocalProfileLoadCoordinator localProfileLoadCoordinator, java.util.function.Supplier<String> accountHashSupplier)
+	PbTrackerSidePanel(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, LocalProfileLoadCoordinator localProfileLoadCoordinator, Supplier<String> accountHashSupplier)
 	{
 		super(false);
 		setBackground(PbTrackerTheme.BG);

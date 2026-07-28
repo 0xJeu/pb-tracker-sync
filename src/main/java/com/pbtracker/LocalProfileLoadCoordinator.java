@@ -90,14 +90,17 @@ class LocalProfileLoadCoordinator
 	 */
 	synchronized boolean markLoaded()
 	{
-		inFlight = false;
 		lastFailureAtMillis = -1;
 		if (pendingRefresh)
 		{
 			pendingRefresh = false;
 			loaded = false;
+			// inFlight stays true - the caller is required to immediately
+			// retry, so from the coordinator's point of view a fetch is
+			// still ongoing until that retry itself completes.
 			return true;
 		}
+		inFlight = false;
 		loaded = true;
 		return false;
 	}
