@@ -99,6 +99,17 @@ public class SyncFingerprintTest
 	}
 
 	@Test
+	public void doesNotCollideWhenDelimiterCharacterShiftsBetweenAccountHashAndDisplayName()
+	{
+		Map<String, Double> pbs = new TreeMap<>();
+		pbs.put("zulrah", 42.6);
+
+		assertNotEquals(
+			SyncFingerprint.compute("x|y", "z", pbs),
+			SyncFingerprint.compute("x", "y|z", pbs));
+	}
+
+	@Test
 	public void isStableAcrossRepeatedCallsWithTheSameInput()
 	{
 		Map<String, Double> pbs = new TreeMap<>();

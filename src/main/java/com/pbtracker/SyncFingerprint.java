@@ -23,9 +23,12 @@ final class SyncFingerprint
 
 	static String compute(String accountHash, String displayName, Map<String, Double> pbs)
 	{
+		String hash = accountHash == null ? "" : accountHash;
+		String normalizedName = normalizeDisplayName(displayName);
+
 		StringBuilder canonical = new StringBuilder();
-		canonical.append(accountHash == null ? "" : accountHash).append('|');
-		canonical.append(normalizeDisplayName(displayName)).append('|');
+		canonical.append(hash.length()).append(':').append(hash).append('|');
+		canonical.append(normalizedName.length()).append(':').append(normalizedName).append('|');
 		for (Map.Entry<String, Double> entry : new TreeMap<>(pbs).entrySet())
 		{
 			String key = entry.getKey();
