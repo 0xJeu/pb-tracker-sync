@@ -288,6 +288,13 @@ public class PbTrackerPlugin extends Plugin
 	private ScheduledFuture<?> pendingLoginSync;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
+	// clear() exists on PersistedFingerprintStore for a future install-recovery
+	// flow if one ever needs to explicitly wipe a stored fingerprint, but
+	// nothing calls it yet: manual "Sync all PBs now" (force=true) already
+	// bypasses the matches() check entirely regardless of what's persisted, so
+	// a user recovering from lost server-side data can always force a resend.
+	// That already provides the escape hatch the spec's install-recovery
+	// requirement was after, without needing clear() wired to anything today.
 	private final PersistedFingerprintStore persistedFingerprintStore =
 		new PersistedFingerprintStore(new PersistedFingerprintStore.ConfigStore()
 		{
@@ -1639,14 +1646,18 @@ public class PbTrackerPlugin extends Plugin
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
 		String fingerprint = force ? null : buildSyncFingerprint(hash, pbs);
-		String persistedFingerprint = force ? null : SyncFingerprint.compute(hash, name, pbs);
+		// Always computed (even when force=true) so the successful-response
+		// callback below has a single, unconditional value to record - no
+		// ternary needed there, and the extra SHA-256 over a short string is
+		// negligible on the manual-sync path.
+		String persistedFingerprint = SyncFingerprint.compute(hash, name, pbs);
 
 		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
 			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
 			return;
 		}
-		if (persistedFingerprint != null && persistedFingerprintStore.matches(hash, persistedFingerprint))
+		if (!force && persistedFingerprintStore.matches(hash, persistedFingerprint))
 		{
 			log.debug("Skipping automatic PB sync for {} PB(s): unchanged since last successful sync", pbs.size());
 			if (fingerprint != null)
@@ -1685,10 +1696,19 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
-							String fingerprintToRecord = persistedFingerprint != null
-								? persistedFingerprint
-								: SyncFingerprint.compute(hash, name, pbs);
-							persistedFingerprintStore.record(hash, fingerprintToRecord);
+							// Safe despite matches()/record() not being atomic together
+							// (see PersistedFingerprintStore's class Javadoc): this value
+							// is derived solely from the captured hash/name/pbs, never
+							// from the earlier matches() result, so it's not a
+							// read-modify-write. The invariant "stored value is the
+							// fingerprint of some payload the server actually accepted
+							// for this account" holds under every interleaving -
+							// automatic-vs-automatic is already serialized by
+							// automaticSyncDeduplicator.tryStart above, and
+							// automatic-vs-manual is unserialized but benign
+							// last-writer-wins (never a wrong skip, only a possible
+							// missed optimization).
+							persistedFingerprintStore.record(hash, persistedFingerprint);
 						}
 						else if (response.code() == 409)
 						{
