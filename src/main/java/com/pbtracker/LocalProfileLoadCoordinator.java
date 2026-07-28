@@ -1,5 +1,6 @@
 package com.pbtracker;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -29,6 +30,8 @@ class LocalProfileLoadCoordinator
 	private boolean inFlight;
 	private boolean loaded;
 	private boolean pendingRefresh;
+	private boolean profileMayChangeAfterSuccessfulSync;
+	private boolean successfulSyncObservedDuringLoad;
 	private long lastFailureAtMillis = -1;
 
 	/** Called for every LOGGED_IN state the plugin observes. */
@@ -90,11 +93,28 @@ class LocalProfileLoadCoordinator
 	 */
 	synchronized boolean markLoaded()
 	{
+		return markLoaded(false);
+	}
+
+	/**
+	 * Records a successful lookup.
+	 *
+	 * @param profileMayChangeAfterSuccessfulSync true when this response
+	 * indicates that a later successful sync could make the lookup resolve
+	 * differently (for example NOT_FOUND or a stale returned display name)
+	 * @return true when the caller must immediately retry the lookup
+	 */
+	synchronized boolean markLoaded(boolean profileMayChangeAfterSuccessfulSync)
+	{
 		lastFailureAtMillis = -1;
-		if (pendingRefresh)
+		boolean retry = pendingRefresh
+			|| successfulSyncObservedDuringLoad && profileMayChangeAfterSuccessfulSync;
+		pendingRefresh = false;
+		successfulSyncObservedDuringLoad = false;
+		if (retry)
 		{
-			pendingRefresh = false;
 			loaded = false;
+			this.profileMayChangeAfterSuccessfulSync = false;
 			// inFlight stays true - the caller is required to immediately
 			// retry, so from the coordinator's point of view a fetch is
 			// still ongoing until that retry itself completes.
@@ -102,33 +122,71 @@ class LocalProfileLoadCoordinator
 		}
 		inFlight = false;
 		loaded = true;
+		this.profileMayChangeAfterSuccessfulSync = profileMayChangeAfterSuccessfulSync;
 		return false;
 	}
 
-	synchronized void markError(long nowMillis)
+	/**
+	 * @return true when a successful sync arrived during this failed lookup
+	 * and the caller must immediately make the one deferred retry
+	 */
+	synchronized boolean markError(long nowMillis)
 	{
+		boolean retry = pendingRefresh || successfulSyncObservedDuringLoad;
+		pendingRefresh = false;
+		successfulSyncObservedDuringLoad = false;
+		if (retry)
+		{
+			loaded = false;
+			profileMayChangeAfterSuccessfulSync = false;
+			lastFailureAtMillis = -1;
+			// Keep inFlight held across the immediate retry hand-off.
+			return true;
+		}
 		inFlight = false;
 		lastFailureAtMillis = nowMillis;
-		pendingRefresh = false;
+		return false;
 	}
 
 	/**
-	 * A successful sync that changed PB data invalidates the loaded session
-	 * result once. If a lookup is already in flight, deferred via
-	 * pendingRefresh instead of clearing loaded directly - otherwise that
-	 * unrelated in-flight lookup's own markLoaded() would stomp loaded back
-	 * to true and silently swallow this refresh for the rest of the session.
+	 * Applies a non-replayed successful sync to the current lookup state.
+	 * Unchanged syncs retain a valid loaded profile, but can refresh a prior
+	 * NOT_FOUND/stale-name result or retry one failed/in-flight lookup.
+	 *
+	 * @return true when the caller should ask the normal load path to refresh
 	 */
-	synchronized void markStaleAfterChangedSync()
+	synchronized boolean requestRefreshAfterSuccessfulSync(boolean responseIndicatesProfileChange)
 	{
 		if (inFlight)
 		{
-			pendingRefresh = true;
+			if (responseIndicatesProfileChange)
+			{
+				pendingRefresh = true;
+			}
+			else
+			{
+				successfulSyncObservedDuringLoad = true;
+			}
+			return responseIndicatesProfileChange;
 		}
-		else
+
+		if (!responseIndicatesProfileChange
+			&& !profileMayChangeAfterSuccessfulSync
+			&& lastFailureAtMillis < 0)
 		{
-			loaded = false;
+			return false;
 		}
+
+		loaded = false;
+		profileMayChangeAfterSuccessfulSync = false;
+		lastFailureAtMillis = -1;
+		return true;
+	}
+
+	/** Compatibility helper for the coordinator's changed-data unit tests. */
+	synchronized void markStaleAfterChangedSync()
+	{
+		requestRefreshAfterSuccessfulSync(true);
 	}
 
 	/** Logout / login-screen state: cancel any pending retry and clear the session entirely. */
@@ -139,6 +197,8 @@ class LocalProfileLoadCoordinator
 		inFlight = false;
 		loaded = false;
 		pendingRefresh = false;
+		profileMayChangeAfterSuccessfulSync = false;
+		successfulSyncObservedDuringLoad = false;
 		lastFailureAtMillis = -1;
 	}
 
@@ -149,6 +209,8 @@ class LocalProfileLoadCoordinator
 		this.inFlight = false;
 		this.loaded = false;
 		this.pendingRefresh = false;
+		this.profileMayChangeAfterSuccessfulSync = false;
+		this.successfulSyncObservedDuringLoad = false;
 		this.lastFailureAtMillis = -1;
 	}
 
@@ -160,6 +222,6 @@ class LocalProfileLoadCoordinator
 
 	private static String normalize(String displayName)
 	{
-		return displayName == null ? "" : displayName.trim().toLowerCase();
+		return displayName == null ? "" : displayName.trim().toLowerCase(Locale.ROOT);
 	}
 }

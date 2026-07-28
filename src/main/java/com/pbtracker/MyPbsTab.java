@@ -12,6 +12,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -103,7 +104,7 @@ class MyPbsTab extends JPanel
 	/** Called on login (and whenever the panel is (re)opened) with the local player's name. */
 	void load(String displayName)
 	{
-		String normalized = displayName == null ? "" : displayName.trim().toLowerCase();
+		String normalized = normalize(displayName);
 		if (normalized.equals(inFlightDisplayName))
 		{
 			// Coordinator-level gating (Task 2) already prevents most
@@ -135,21 +136,23 @@ class MyPbsTab extends JPanel
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
 						scrollToTop();
-						if (localProfileLoadCoordinator.markLoaded())
+						boolean returnedUnderDifferentName = result.player == null
+							|| !normalized.equals(normalize(result.player.displayName));
+						if (localProfileLoadCoordinator.markLoaded(returnedUnderDifferentName))
 						{
 							load(displayName);
 						}
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found yet - sync with the plugin first.");
-						if (localProfileLoadCoordinator.markLoaded())
+						if (localProfileLoadCoordinator.markLoaded(true))
 						{
 							load(displayName);
 						}
 						break;
 					case AMBIGUOUS:
 						listPanel.showMessage("Multiple synced accounts share this name - check the website directly.");
-						if (localProfileLoadCoordinator.markLoaded())
+						if (localProfileLoadCoordinator.markLoaded(true))
 						{
 							load(displayName);
 						}
@@ -157,7 +160,10 @@ class MyPbsTab extends JPanel
 					case ERROR:
 					default:
 						listPanel.showMessage("Lookup failed - try again later.");
-						localProfileLoadCoordinator.markError(System.currentTimeMillis());
+						if (localProfileLoadCoordinator.markError(System.currentTimeMillis()))
+						{
+							load(displayName);
+						}
 						break;
 				}
 			});
@@ -199,5 +205,10 @@ class MyPbsTab extends JPanel
 	void onSettingsChanged()
 	{
 		listPanel.onSettingsChanged();
+	}
+
+	private static String normalize(String displayName)
+	{
+		return displayName == null ? "" : displayName.trim().toLowerCase(Locale.ROOT);
 	}
 }

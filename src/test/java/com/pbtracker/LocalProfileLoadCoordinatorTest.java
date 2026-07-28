@@ -169,13 +169,53 @@ public class LocalProfileLoadCoordinatorTest
 	{
 		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
 		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
-		coordinator.markLoaded();
+		coordinator.markLoaded(false);
 
-		// No markStaleAfterChangedSync() call - an unchanged/deduplicated sync
-		// must leave the already-loaded profile alone.
+		assertFalse(coordinator.requestRefreshAfterSuccessfulSync(false));
 		assertEquals(
 			LocalProfileLoadCoordinator.Decision.SKIP_ALREADY_LOADED,
 			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
+	}
+
+	@Test
+	public void unchangedSyncRefreshesAPriorNotFoundResultOnce()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "RenamedPlayer", 1_000L);
+		coordinator.markLoaded(true);
+
+		assertTrue(coordinator.requestRefreshAfterSuccessfulSync(false));
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-a", "RenamedPlayer", 2_000L));
+	}
+
+	@Test
+	public void unchangedSyncDuringAValidLoadDoesNotCreateASecondLookup()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+
+		assertFalse(coordinator.requestRefreshAfterSuccessfulSync(false));
+		assertFalse(coordinator.markLoaded(false));
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_ALREADY_LOADED,
+			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
+	}
+
+	@Test
+	public void unchangedSyncDuringANotFoundLoadRetriesAfterTheOutcomeIsKnown()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "RenamedPlayer", 1_000L);
+
+		assertFalse(coordinator.requestRefreshAfterSuccessfulSync(false));
+		assertTrue(coordinator.markLoaded(true));
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_IN_FLIGHT,
+			coordinator.onLoginState("acct-a", "RenamedPlayer", 2_000L));
+
+		assertFalse(coordinator.markLoaded(false));
 	}
 
 	@Test
@@ -303,5 +343,33 @@ public class LocalProfileLoadCoordinatorTest
 		// Finally, retry C (for sync #2) completes with nothing further
 		// pending, and the session settles into a genuinely loaded state.
 		assertFalse(coordinator.markLoaded());
+	}
+
+	@Test
+	public void changedSyncRefreshSurvivesAnInFlightLookupError()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+		assertTrue(coordinator.requestRefreshAfterSuccessfulSync(true));
+
+		assertTrue(coordinator.markError(1_100L));
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.SKIP_IN_FLIGHT,
+			coordinator.onLoginState("acct-a", "Zezima", 1_101L));
+
+		assertFalse(coordinator.markLoaded(false));
+	}
+
+	@Test
+	public void successfulSyncRetriesAPriorLookupErrorWithoutWaitingForAnotherLoginEvent()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+		assertFalse(coordinator.markError(1_100L));
+
+		assertTrue(coordinator.requestRefreshAfterSuccessfulSync(false));
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-a", "Zezima", 1_101L));
 	}
 }

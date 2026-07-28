@@ -72,17 +72,49 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
-	public void successfulSyncWithNoPbUpdatesStillRefreshesLocalProfile()
+	public void successfulSyncWithNoChangesDoesNotRefreshLocalProfileByItself()
 	{
 		SyncClient.SyncResponseDto outcome = new SyncClient.SyncResponseDto();
 		outcome.updated = 0;
+
+		assertTrue(PbTrackerPlugin.isNonDeduplicatedSuccessfulSyncOutcome(outcome));
+		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(outcome));
+	}
+
+	@Test
+	public void metadataOnlySyncRefreshesLocalProfile()
+	{
+		SyncClient.SyncResponseDto outcome = new SyncClient.SyncResponseDto();
+		outcome.updated = 0;
+		outcome.metadataChanged = true;
 
 		assertTrue(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(outcome));
 	}
 
 	@Test
+	public void pbUpdateRefreshesLocalProfile()
+	{
+		SyncClient.SyncResponseDto outcome = new SyncClient.SyncResponseDto();
+		outcome.updated = 1;
+
+		assertTrue(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(outcome));
+	}
+
+	@Test
+	public void replayedSyncDoesNotRefreshLocalProfile()
+	{
+		SyncClient.SyncResponseDto outcome = new SyncClient.SyncResponseDto();
+		outcome.updated = 0;
+		outcome.deduplicated = true;
+
+		assertFalse(PbTrackerPlugin.isNonDeduplicatedSuccessfulSyncOutcome(outcome));
+		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(outcome));
+	}
+
+	@Test
 	public void malformedSyncResponseDoesNotRefreshLocalProfile()
 	{
+		assertFalse(PbTrackerPlugin.isNonDeduplicatedSuccessfulSyncOutcome(new SyncClient.SyncResponseDto()));
 		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(new SyncClient.SyncResponseDto()));
 		assertFalse(PbTrackerPlugin.shouldRefreshLocalProfileAfterSync(null));
 	}

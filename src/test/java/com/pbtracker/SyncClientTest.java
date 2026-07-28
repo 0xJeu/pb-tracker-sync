@@ -40,10 +40,12 @@ public class SyncClientTest
 	public void parsesUpdatedCountFromAWellFormedResponse()
 	{
 		SyncClient.SyncResponseDto dto = newClient().parseSyncResponse(
-			responseWithBody("{\"ok\":true,\"playerId\":123,\"received\":5,\"updated\":2}"));
+			responseWithBody("{\"ok\":true,\"playerId\":123,\"received\":5,\"updated\":2,\"metadataChanged\":true,\"deduplicated\":false}"));
 
 		assertNotNull(dto.updated);
 		org.junit.Assert.assertEquals(2, dto.updated.intValue());
+		org.junit.Assert.assertEquals(Boolean.TRUE, dto.metadataChanged);
+		org.junit.Assert.assertEquals(Boolean.FALSE, dto.deduplicated);
 	}
 
 	@Test
