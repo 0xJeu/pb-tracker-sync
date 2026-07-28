@@ -308,7 +308,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config, localProfileLoadCoordinator);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config, localProfileLoadCoordinator, () -> accountHash);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())

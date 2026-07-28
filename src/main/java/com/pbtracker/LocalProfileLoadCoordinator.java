@@ -82,18 +82,24 @@ class LocalProfileLoadCoordinator
 		return Decision.LOAD;
 	}
 
-	synchronized void markLoaded()
+	/**
+	 * @return true if a changed-sync refresh was owed (pendingRefresh had
+	 * been set) and was just consumed here rather than being fully
+	 * satisfied - the caller should immediately start another load instead
+	 * of treating the session as up to date.
+	 */
+	synchronized boolean markLoaded()
 	{
 		inFlight = false;
+		lastFailureAtMillis = -1;
 		if (pendingRefresh)
 		{
 			pendingRefresh = false;
 			loaded = false;
+			return true;
 		}
-		else
-		{
-			loaded = true;
-		}
+		loaded = true;
+		return false;
 	}
 
 	synchronized void markError(long nowMillis)

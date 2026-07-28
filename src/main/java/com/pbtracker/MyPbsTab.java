@@ -27,16 +27,18 @@ class MyPbsTab extends JPanel
 	private final JScrollPane scrollPane;
 	private final JLabel viewOnWebsiteButton;
 	private final LocalProfileLoadCoordinator localProfileLoadCoordinator;
+	private final java.util.function.Supplier<String> accountHashSupplier;
 	private long requestGeneration;
 	private volatile String inFlightDisplayName;
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator, java.util.function.Supplier<String> accountHashSupplier)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
 		this.localProfileLoadCoordinator = localProfileLoadCoordinator;
+		this.accountHashSupplier = accountHashSupplier;
 		this.listPanel = new PbListPanel(spriteManager, config);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
@@ -132,15 +134,24 @@ class MyPbsTab extends JPanel
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
 						scrollToTop();
-						localProfileLoadCoordinator.markLoaded();
+						if (localProfileLoadCoordinator.markLoaded())
+						{
+							load(displayName);
+						}
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found yet - sync with the plugin first.");
-						localProfileLoadCoordinator.markLoaded();
+						if (localProfileLoadCoordinator.markLoaded())
+						{
+							load(displayName);
+						}
 						break;
 					case AMBIGUOUS:
 						listPanel.showMessage("Multiple synced accounts share this name - check the website directly.");
-						localProfileLoadCoordinator.markLoaded();
+						if (localProfileLoadCoordinator.markLoaded())
+						{
+							load(displayName);
+						}
 						break;
 					case ERROR:
 					default:
@@ -152,14 +163,23 @@ class MyPbsTab extends JPanel
 		}, "pbtracker-mypbs-lookup").start();
 	}
 
-	/** Bypasses the coordinator's "already loaded this session" cache but still coalesces a concurrent refresh via the same in-flight guard as load(). */
+	/** Goes through the coordinator's own manual-refresh decision (bypasses its "already loaded" cache but still coalesces a concurrent refresh at the coordinator level) so this path stays in sync with the coordinator's in-flight tracking instead of relying only on the local inFlightDisplayName guard. */
 	void refresh()
 	{
 		if (currentDisplayName == null)
 		{
 			return;
 		}
-		load(currentDisplayName);
+		String accountHash = accountHashSupplier.get();
+		if (accountHash == null)
+		{
+			return;
+		}
+		LocalProfileLoadCoordinator.Decision decision = localProfileLoadCoordinator.onManualRefresh(accountHash, currentDisplayName);
+		if (decision == LocalProfileLoadCoordinator.Decision.LOAD)
+		{
+			load(currentDisplayName);
+		}
 	}
 
 	private void scrollToTop()

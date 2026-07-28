@@ -3,6 +3,8 @@ package com.pbtracker;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class LocalProfileLoadCoordinatorTest
 {
@@ -193,5 +195,57 @@ public class LocalProfileLoadCoordinatorTest
 		assertEquals(
 			LocalProfileLoadCoordinator.Decision.LOAD,
 			coordinator.onLoginState("acct-a", "Zezima", 2_000L));
+	}
+
+	@Test
+	public void markLoadedReturnsFalseInTheNormalNoPendingRefreshCase()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+
+		assertFalse(coordinator.markLoaded());
+	}
+
+	@Test
+	public void markLoadedReturnsTrueWhenARefreshWasPendingAndConsumesIt()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		// An unrelated lookup is already in flight (e.g. a world hop retry)...
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+		// ...and a changed-data sync's onResponse fires while it's still in flight.
+		coordinator.markStaleAfterChangedSync();
+
+		// The in-flight lookup completes: a refresh is still owed, so this must
+		// report true so the caller knows to immediately start another load
+		// rather than treating the session as up to date.
+		assertTrue(coordinator.markLoaded());
+
+		// That pendingRefresh was consumed, so the caller's own re-triggered
+		// load's eventual markLoaded() call sees nothing pending and reports false.
+		assertFalse(coordinator.markLoaded());
+	}
+
+	@Test
+	public void markLoadedClearsStaleFailureBackoffTimestamp()
+	{
+		LocalProfileLoadCoordinator coordinator = new LocalProfileLoadCoordinator();
+		coordinator.onLoginState("acct-a", "Zezima", 1_000L);
+		coordinator.markError(1_000L); // sets lastFailureAtMillis = 1_000L
+
+		// A later load for the same session (past the 30s backoff window)
+		// succeeds...
+		coordinator.onLoginState("acct-a", "Zezima", 31_001L);
+		coordinator.markLoaded();
+
+		// Force loaded back to false (as markStaleAfterChangedSync() would)
+		// so onLoginState re-evaluates the backoff check instead of short
+		// circuiting on SKIP_ALREADY_LOADED - this isolates whether the old
+		// (now stale) failure timestamp from 1_000L was actually cleared by
+		// the successful markLoaded() above.
+		coordinator.markStaleAfterChangedSync();
+
+		assertEquals(
+			LocalProfileLoadCoordinator.Decision.LOAD,
+			coordinator.onLoginState("acct-a", "Zezima", 31_100L));
 	}
 }
