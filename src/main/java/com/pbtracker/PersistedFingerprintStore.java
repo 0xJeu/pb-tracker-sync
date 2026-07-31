@@ -1,9 +1,12 @@
 package com.pbtracker;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 
 /**
- * Persists the last successful automatic-sync SyncFingerprint per account,
+ * Persists the last successful sync fingerprint per account,
  * so an unchanged payload doesn't repeat the POST across RuneLite restarts
  * (the in-memory AutomaticSyncDeduplicator only covers duplicates within a
  * single running session).
@@ -24,6 +27,7 @@ import java.util.Objects;
 final class PersistedFingerprintStore
 {
 	private static final String KEY_PREFIX = "syncFingerprint.v1.";
+	private static final String ACCOUNT_KEY_DOMAIN = "pbtracker.persisted-sync.account-key.v1\0";
 
 	/** Minimal storage seam this class needs - implemented against RuneLite's real ConfigManager in PbTrackerPlugin. */
 	interface ConfigStore
@@ -51,11 +55,28 @@ final class PersistedFingerprintStore
 		// passes one under the literal key "syncFingerprint.v1.null", so
 		// fail loudly instead.
 		Objects.requireNonNull(accountHash, "accountHash");
-		// accountHash is itself an opaque numeric-ish identifier (not a
-		// secret, not a display name), safe to use directly as a config key
-		// suffix - matches how the rest of this plugin already treats it
-		// (e.g. logged at debug level elsewhere without redaction concerns).
-		return KEY_PREFIX + accountHash;
+		return KEY_PREFIX + opaqueAccountSuffix(accountHash);
+	}
+
+	private static String opaqueAccountSuffix(String accountHash)
+	{
+		try
+		{
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			digest.update(ACCOUNT_KEY_DOMAIN.getBytes(StandardCharsets.UTF_8));
+			byte[] hashed = digest.digest(accountHash.getBytes(StandardCharsets.UTF_8));
+			StringBuilder hex = new StringBuilder(hashed.length * 2);
+			for (byte b : hashed)
+			{
+				hex.append(Character.forDigit((b >>> 4) & 0x0f, 16));
+				hex.append(Character.forDigit(b & 0x0f, 16));
+			}
+			return hex.toString();
+		}
+		catch (NoSuchAlgorithmException e)
+		{
+			throw new IllegalStateException("SHA-256 not available", e);
+		}
 	}
 
 	/** True if the given fingerprint matches what's stored for this account - i.e. nothing has changed since the last successful sync. */

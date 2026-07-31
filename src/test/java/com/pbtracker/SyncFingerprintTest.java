@@ -3,6 +3,7 @@ package com.pbtracker;
 import org.junit.Test;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -67,6 +68,25 @@ public class SyncFingerprintTest
 		assertEquals(
 			SyncFingerprint.compute("acct-a", "Zezima", pbs),
 			SyncFingerprint.compute("acct-a", "  ZEZIMA  ", pbs));
+	}
+
+	@Test
+	public void displayNameNormalizationIsStableUnderTurkishLocale()
+	{
+		Locale original = Locale.getDefault();
+		Map<String, Double> pbs = new TreeMap<>();
+		pbs.put("zulrah", 42.6);
+		try
+		{
+			Locale.setDefault(Locale.ENGLISH);
+			String english = SyncFingerprint.compute("acct-a", "IRON", pbs);
+			Locale.setDefault(new Locale("tr", "TR"));
+			assertEquals(english, SyncFingerprint.compute("acct-a", "IRON", pbs));
+		}
+		finally
+		{
+			Locale.setDefault(original);
+		}
 	}
 
 	@Test

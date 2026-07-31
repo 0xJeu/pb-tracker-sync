@@ -200,6 +200,33 @@ class SyncClient
 		String updatedAt;
 	}
 
+	static class SyncResponseDto
+	{
+		Integer updated;
+		Boolean metadataChanged;
+		Boolean deduplicated;
+	}
+
+	/** Best-effort parse of the sync response body; returns an all-null result on any parse failure so callers fail safe (no forced refresh, no crash). */
+	SyncResponseDto parseSyncResponse(Response response)
+	{
+		try
+		{
+			ResponseBody body = response.body();
+			String json = body == null ? null : body.string();
+			if (json == null)
+			{
+				return new SyncResponseDto();
+			}
+			SyncResponseDto parsed = gson.fromJson(json, SyncResponseDto.class);
+			return parsed == null ? new SyncResponseDto() : parsed;
+		}
+		catch (IOException | RuntimeException e)
+		{
+			return new SyncResponseDto();
+		}
+	}
+
 	private static class SyncPayload
 	{
 		final String accountHash;

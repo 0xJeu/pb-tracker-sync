@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 public class PersistedFingerprintStoreTest
@@ -64,6 +65,18 @@ public class PersistedFingerprintStoreTest
 		PersistedFingerprintStore store = new PersistedFingerprintStore(new FakeConfigStore());
 		store.record("acct-a", "fingerprint-1");
 		assertFalse(store.matches("acct-b", "fingerprint-1"));
+	}
+
+	@Test
+	public void configKeyUsesAStableOpaqueDigestInsteadOfTheRawAccountHash()
+	{
+		String accountHash = "raw-account-hash-12345";
+		String key = PersistedFingerprintStore.configKeyFor(accountHash);
+
+		assertFalse(key.contains(accountHash));
+		assertTrue(key.matches("syncFingerprint\\.v1\\.[0-9a-f]{64}"));
+		assertEquals(key, PersistedFingerprintStore.configKeyFor(accountHash));
+		assertNotEquals(key, PersistedFingerprintStore.configKeyFor("different-account"));
 	}
 
 	@Test

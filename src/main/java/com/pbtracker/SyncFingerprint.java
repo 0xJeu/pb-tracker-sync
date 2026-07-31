@@ -3,6 +3,7 @@ package com.pbtracker;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -45,7 +46,7 @@ final class SyncFingerprint
 
 	private static String normalizeDisplayName(String displayName)
 	{
-		return displayName == null ? "" : displayName.trim().toLowerCase();
+		return displayName == null ? "" : displayName.trim().toLowerCase(Locale.ROOT);
 	}
 
 	private static String sha256Hex(String input)

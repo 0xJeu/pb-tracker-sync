@@ -18,6 +18,18 @@
 
 **Tech Stack:** Java 17, Gradle/RuneLite plugin template, JUnit 4 (matches `PbTrackerPluginUnitTest`), `java.security.MessageDigest` for SHA-256 (no new dependency needed - it's JDK-standard).
 
+**Post-review integration amendment (2026-07-31):** After PR #16 merged, the
+final implementation was updated to retain its account-aware local-profile
+coordinator alongside this persisted fingerprint gate. A production-used
+`PersistentSyncCoordinator` seam now owns the combined completion behavior so
+tests prove automatic skip/manual bypass, failure and 409 non-recording, and a
+successful response recording the fingerprint while requesting PR #16's
+profile refresh. Review also hardened config keys to use a domain-separated
+SHA-256 account suffix instead of exposing the raw account hash, and made
+display-name normalization locale-stable with `Locale.ROOT`. Where older task
+snippets below show a raw account-hash suffix or direct callback wiring, this
+amendment and the final source are authoritative.
+
 **Before starting:**
 ```bash
 cd "OSRS Stuff/worktrees/pb-tracker-sync-fingerprint"

@@ -279,7 +279,7 @@ public class PbTrackerPlugin extends Plugin
 	private PbTrackerSidePanel sidePanel;
 	private net.runelite.client.ui.NavigationButton navButton;
 
-	private String accountHash;
+	private volatile String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private Dt2Scoreboard pendingDt2Scoreboard;
@@ -316,6 +316,9 @@ public class PbTrackerPlugin extends Plugin
 				configManager.unsetConfiguration(SETTINGS_GROUP, key);
 			}
 		});
+	private final LocalProfileLoadCoordinator localProfileLoadCoordinator = new LocalProfileLoadCoordinator();
+	private final PersistentSyncCoordinator persistentSyncCoordinator =
+		new PersistentSyncCoordinator(persistedFingerprintStore, localProfileLoadCoordinator);
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -335,7 +338,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config, localProfileLoadCoordinator, () -> accountHash);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
@@ -436,6 +439,7 @@ public class PbTrackerPlugin extends Plugin
 			|| event.getGameState() == GameState.LOGIN_SCREEN_AUTHENTICATOR)
 		{
 			resetLoginSyncSession();
+			localProfileLoadCoordinator.reset();
 			if (sidePanel != null)
 			{
 				javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
@@ -453,7 +457,7 @@ public class PbTrackerPlugin extends Plugin
 		}
 		if (sidePanel != null)
 		{
-			loadLocalPlayerPanelWhenReady(0);
+			loadLocalPlayerPanelWhenReady(0, currentAccountHash);
 		}
 	}
 
@@ -520,9 +524,15 @@ public class PbTrackerPlugin extends Plugin
 		}
 	}
 
-	private void loadLocalPlayerPanelWhenReady(int attempt)
+	private void loadLocalPlayerPanelWhenReady(int attempt, String forAccountHash)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		// Re-read the client hash before acting so a retry that started racing
+		// with an account change can never load or dedup under the previous account.
+		if (!forAccountHash.equals(String.valueOf(client.getAccountHash())))
 		{
 			return;
 		}
@@ -530,13 +540,20 @@ public class PbTrackerPlugin extends Plugin
 		if (localPlayer != null && localPlayer.getName() != null)
 		{
 			String displayName = localPlayer.getName();
+			LocalProfileLoadCoordinator.Decision decision =
+				localProfileLoadCoordinator.onLoginState(forAccountHash, displayName, System.currentTimeMillis());
+			if (decision != LocalProfileLoadCoordinator.Decision.LOAD)
+			{
+				log.debug("Skipping My PBs sidebar load for {}: {}", displayName, decision);
+				return;
+			}
 			log.debug("Loading My PBs sidebar for {} on attempt {}", displayName, attempt + 1);
 			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(displayName));
 			return;
 		}
 		if (attempt < 4)
 		{
-			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1), 1, TimeUnit.SECONDS);
+			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1, forAccountHash), 1, TimeUnit.SECONDS);
 		}
 	}
 
@@ -1657,7 +1674,7 @@ public class PbTrackerPlugin extends Plugin
 			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
 			return;
 		}
-		if (!force && persistedFingerprintStore.matches(hash, persistedFingerprint))
+		if (persistentSyncCoordinator.shouldSkip(force, hash, persistedFingerprint))
 		{
 			log.debug("Skipping automatic PB sync for {} PB(s): unchanged since last successful sync", pbs.size());
 			if (fingerprint != null)
@@ -1679,6 +1696,8 @@ public class PbTrackerPlugin extends Plugin
 				@Override
 				public void onFailure(Call call, IOException e)
 				{
+					persistentSyncCoordinator.complete(
+						false, hash, accountHash, persistedFingerprint, null);
 					if (fingerprint != null)
 					{
 						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
@@ -1696,26 +1715,26 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
-							// Safe despite matches()/record() not being atomic together
-							// (see PersistedFingerprintStore's class Javadoc): this value
-							// is derived solely from the captured hash/name/pbs, never
-							// from the earlier matches() result, so it's not a
-							// read-modify-write. The invariant "stored value is the
-							// fingerprint of some payload the server actually accepted
-							// for this account" holds under every interleaving -
-							// automatic-vs-automatic is already serialized by
-							// automaticSyncDeduplicator.tryStart above, and
-							// automatic-vs-manual is unserialized but benign
-							// last-writer-wins (never a wrong skip, only a possible
-							// missed optimization).
-							persistedFingerprintStore.record(hash, persistedFingerprint);
+							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
+							if (persistentSyncCoordinator.complete(
+								true, hash, accountHash, persistedFingerprint, outcome))
+							{
+								if (sidePanel != null)
+								{
+									loadLocalPlayerPanelWhenReady(0, hash);
+								}
+							}
 						}
 						else if (response.code() == 409)
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
 							setStatus("Sync rejected: this account is already synced from a different install.");
 						}
 						else
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
 							setStatus("Server responded with error " + response.code());
 						}
 					}
@@ -1732,12 +1751,35 @@ public class PbTrackerPlugin extends Plugin
 		}
 		catch (RuntimeException ex)
 		{
+			persistentSyncCoordinator.complete(
+				false, hash, accountHash, persistedFingerprint, null);
 			if (fingerprint != null)
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 			}
 			throw ex;
 		}
+	}
+
+	/**
+	 * Replayed syncs and malformed responses cannot establish a new profile
+	 * state. A valid non-replayed zero-update response is still passed to the
+	 * coordinator, which only refreshes it when the prior lookup showed that
+	 * profile metadata may have been stale.
+	 */
+	static boolean isNonDeduplicatedSuccessfulSyncOutcome(SyncClient.SyncResponseDto outcome)
+	{
+		return outcome != null
+			&& (outcome.updated != null || outcome.metadataChanged != null)
+			&& !Boolean.TRUE.equals(outcome.deduplicated);
+	}
+
+	/** Returns true only when the response itself reports a profile-affecting change. */
+	static boolean shouldRefreshLocalProfileAfterSync(SyncClient.SyncResponseDto outcome)
+	{
+		return isNonDeduplicatedSuccessfulSyncOutcome(outcome)
+			&& (outcome.updated != null && outcome.updated > 0
+				|| Boolean.TRUE.equals(outcome.metadataChanged));
 	}
 
 	/**
