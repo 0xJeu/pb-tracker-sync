@@ -96,9 +96,14 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SYNC_STATUS_KEY = "syncStatus";
 	private static final String DUMP_RAW_KEY = "dumpRawPbs";
 	private static final String OPEN_PROFILE_KEY = "openProfile";
+	private static final String OPEN_RECOVERY_HELP_KEY = "openRecoveryHelp";
+	private static final String RECOVERY_ID_KEY_PREFIX = "lastRecoveryId.";
+	private static final String RECOVERY_CODE_KEY_PREFIX = "lastRecoveryCode.";
 	private static final String SHOW_OVERALL_VARIANTS_KEY = "showOverallVariants";
 	private static final String SHOW_ROOM_VARIANTS_KEY = "showRoomVariants";
 	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
+	private static final String RECOVERY_SITE_URL = PROFILE_SITE_URL + "/recovery";
+	private static final String DEFAULT_API_BASE_URL = "https://osrs-pb-tracker-backend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 	private static final long LOGIN_SYNC_DELAY_SECONDS = 5;
 	private static final long AUTOMATIC_DUPLICATE_WINDOW_MILLIS = TimeUnit.SECONDS.toMillis(30);
@@ -647,6 +652,10 @@ public class PbTrackerPlugin extends Plugin
 			else if (OPEN_PROFILE_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
 				executor.execute(this::openProfile);
+			}
+			else if (OPEN_RECOVERY_HELP_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
+			{
+				executor.execute(this::openRecoveryHelp);
 			}
 			else if ((SHOW_OVERALL_VARIANTS_KEY.equals(event.getKey()) || SHOW_ROOM_VARIANTS_KEY.equals(event.getKey()))
 				&& sidePanel != null)
@@ -1591,6 +1600,73 @@ public class PbTrackerPlugin extends Plugin
 		LinkBrowser.browse(url);
 	}
 
+	private void openRecoveryHelp()
+	{
+		String configuredApi = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
+		if (!DEFAULT_API_BASE_URL.equals(configuredApi))
+		{
+			setStatus("Recovery help is hosted for the default PB Tracker server. Contact your custom backend operator.");
+			return;
+		}
+		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
+		Integer recoveryId = parsePositiveInteger(
+			configManager.getConfiguration(SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash));
+		String recoveryCode = configManager.getConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash);
+		LinkBrowser.browse(buildRecoveryHelpUrl(recoveryId, recoveryCode));
+	}
+
+	private void persistRecoveryState(String hash, SyncClient.SyncErrorResponse response)
+	{
+		if (response.recoveryId == null)
+		{
+			clearRecoveryState(hash);
+			return;
+		}
+		configManager.setConfiguration(
+			SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash, String.valueOf(response.recoveryId));
+		configManager.setConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash, response.code);
+	}
+
+	private void clearRecoveryState(String hash)
+	{
+		configManager.unsetConfiguration(SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash);
+		configManager.unsetConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash);
+	}
+
+	private static Integer parsePositiveInteger(String value)
+	{
+		if (value == null || !value.matches("[1-9]\\d*"))
+		{
+			return null;
+		}
+		try
+		{
+			int parsed = Integer.parseInt(value);
+			return parsed > 0 ? parsed : null;
+		}
+		catch (NumberFormatException ignored)
+		{
+			return null;
+		}
+	}
+
+	static String buildRecoveryHelpUrl(Integer recoveryId, String recoveryCode)
+	{
+		if (recoveryId == null || recoveryId <= 0)
+		{
+			return RECOVERY_SITE_URL;
+		}
+		StringBuilder url = new StringBuilder(RECOVERY_SITE_URL)
+			.append("?id=")
+			.append(recoveryId);
+		if (recoveryCode != null && recoveryCode.matches("[A-Z_]{1,80}"))
+		{
+			url.append("&state=")
+				.append(URLEncoder.encode(recoveryCode, StandardCharsets.UTF_8).replace("+", "%20"));
+		}
+		return url.toString();
+	}
+
 	/**
 	 * Pure formatting of a raw personalbest.* map into a diagnostic report,
 	 * annotating each entry with whether shouldSyncRawPersonalBest() would
@@ -1730,6 +1806,7 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							installRecoveryCircuitBreaker.recordSuccess(hash);
+							clearRecoveryState(hash);
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
 							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
 							if (persistentSyncCoordinator.complete(
@@ -1751,6 +1828,7 @@ public class PbTrackerPlugin extends Plugin
 							// suppressed by the persisted unchanged-payload gate.
 							persistentSyncCoordinator.invalidateFingerprint(hash);
 							SyncClient.SyncErrorResponse syncError = syncClient.parseSyncErrorResponse(response);
+							persistRecoveryState(hash, syncError);
 							installRecoveryCircuitBreaker.recordMismatch(hash, syncError, System.currentTimeMillis());
 							setStatus(formatInstallRecoveryStatus(syncError));
 						}
@@ -1821,6 +1899,7 @@ public class PbTrackerPlugin extends Plugin
 		if (response.recoveryId != null)
 		{
 			status += " (#" + response.recoveryId + ")";
+			status += ". Open Recovery help in plugin settings";
 		}
 		if (InstallRecoveryCircuitBreaker.allowsTimedRetry(response) && response.retryAfterSeconds != null)
 		{

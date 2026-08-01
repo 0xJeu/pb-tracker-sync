@@ -28,6 +28,20 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void recoveryHelpUrlCarriesOnlySafeRecoveryMetadata()
+	{
+		assertEquals(
+			"https://osrs-pb-tracker-frontend.vercel.app/recovery?id=42&state=RECOVERY_CONTESTED",
+			PbTrackerPlugin.buildRecoveryHelpUrl(42, "RECOVERY_CONTESTED"));
+		assertEquals(
+			"https://osrs-pb-tracker-frontend.vercel.app/recovery?id=42",
+			PbTrackerPlugin.buildRecoveryHelpUrl(42, "unsafe value"));
+		assertEquals(
+			"https://osrs-pb-tracker-frontend.vercel.app/recovery",
+			PbTrackerPlugin.buildRecoveryHelpUrl(null, null));
+	}
+
+	@Test
 	public void manualSyncBypassesAllAutomaticGuards()
 	{
 		assertFalse(PbTrackerPlugin.usesAutomaticSyncGuards(true));

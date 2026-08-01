@@ -123,7 +123,7 @@ public class InstallRecoveryCircuitBreakerTest
 			"{\"code\":\"RECOVERY_CONTESTED\",\"recoveryId\":19,\"retryAfterSeconds\":900}"
 		));
 
-		assertEquals("Install recovery needs review (#19). Automatic sync paused for this client session.", status);
+		assertEquals("Install recovery needs review (#19). Open Recovery help in plugin settings. Automatic sync paused for this client session.", status);
 		assertFalse(status.contains("installSecret"));
 	}
 
@@ -131,11 +131,11 @@ public class InstallRecoveryCircuitBreakerTest
 	public void formatsCurrentBackendInvalidationStates()
 	{
 		assertEquals(
-			"Install recovery safety check pending (#20). Automatic sync paused for 30 seconds.",
+			"Install recovery safety check pending (#20). Open Recovery help in plugin settings. Automatic sync paused for 30 seconds.",
 			PbTrackerPlugin.formatInstallRecoveryStatus(response(
 				"{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"recoveryId\":20,\"retryAfterSeconds\":30}")));
 		assertEquals(
-			"Install recovery safety check failed (#21). Automatic sync paused for this client session.",
+			"Install recovery safety check failed (#21). Open Recovery help in plugin settings. Automatic sync paused for this client session.",
 			PbTrackerPlugin.formatInstallRecoveryStatus(response(
 				"{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"recoveryId\":21,\"retryAfterSeconds\":30}")));
 	}
