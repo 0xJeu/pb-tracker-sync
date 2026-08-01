@@ -288,7 +288,37 @@ public class PbTrackerPlugin extends Plugin
 	private ScheduledFuture<?> pendingLoginSync;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
+	// clear() exists on PersistedFingerprintStore for a future install-recovery
+	// flow if one ever needs to explicitly wipe a stored fingerprint, but
+	// nothing calls it yet: manual "Sync all PBs now" (force=true) already
+	// bypasses the matches() check entirely regardless of what's persisted, so
+	// a user recovering from lost server-side data can always force a resend.
+	// That already provides the escape hatch the spec's install-recovery
+	// requirement was after, without needing clear() wired to anything today.
+	private final PersistedFingerprintStore persistedFingerprintStore =
+		new PersistedFingerprintStore(new PersistedFingerprintStore.ConfigStore()
+		{
+			@Override
+			public String get(String key)
+			{
+				return configManager.getConfiguration(SETTINGS_GROUP, key);
+			}
+
+			@Override
+			public void set(String key, String value)
+			{
+				configManager.setConfiguration(SETTINGS_GROUP, key, value);
+			}
+
+			@Override
+			public void unset(String key)
+			{
+				configManager.unsetConfiguration(SETTINGS_GROUP, key);
+			}
+		});
 	private final LocalProfileLoadCoordinator localProfileLoadCoordinator = new LocalProfileLoadCoordinator();
+	private final PersistentSyncCoordinator persistentSyncCoordinator =
+		new PersistentSyncCoordinator(persistedFingerprintStore, localProfileLoadCoordinator);
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -1633,10 +1663,25 @@ public class PbTrackerPlugin extends Plugin
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
 		String fingerprint = force ? null : buildSyncFingerprint(hash, pbs);
+		// Always computed (even when force=true) so the successful-response
+		// callback below has a single, unconditional value to record - no
+		// ternary needed there, and the extra SHA-256 over a short string is
+		// negligible on the manual-sync path.
+		String persistedFingerprint = SyncFingerprint.compute(hash, name, pbs);
 
 		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
 			log.debug("Suppressing duplicate automatic PB sync for {} PB(s)", pbs.size());
+			return;
+		}
+		if (persistentSyncCoordinator.shouldSkip(force, hash, persistedFingerprint))
+		{
+			log.debug("Skipping automatic PB sync for {} PB(s): unchanged since last successful sync", pbs.size());
+			if (fingerprint != null)
+			{
+				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+			}
+			setStatus("No PB changes since last successful sync" + suffix);
 			return;
 		}
 		if (startedStatus != null)
@@ -1651,6 +1696,8 @@ public class PbTrackerPlugin extends Plugin
 				@Override
 				public void onFailure(Call call, IOException e)
 				{
+					persistentSyncCoordinator.complete(
+						false, hash, accountHash, persistedFingerprint, null);
 					if (fingerprint != null)
 					{
 						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
@@ -1669,10 +1716,8 @@ public class PbTrackerPlugin extends Plugin
 						{
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
 							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
-							if (hash.equals(accountHash)
-								&& isNonDeduplicatedSuccessfulSyncOutcome(outcome)
-								&& localProfileLoadCoordinator.requestRefreshAfterSuccessfulSync(
-									shouldRefreshLocalProfileAfterSync(outcome)))
+							if (persistentSyncCoordinator.complete(
+								true, hash, accountHash, persistedFingerprint, outcome))
 							{
 								if (sidePanel != null)
 								{
@@ -1682,10 +1727,14 @@ public class PbTrackerPlugin extends Plugin
 						}
 						else if (response.code() == 409)
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
 							setStatus("Sync rejected: this account is already synced from a different install.");
 						}
 						else
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
 							setStatus("Server responded with error " + response.code());
 						}
 					}
@@ -1702,6 +1751,8 @@ public class PbTrackerPlugin extends Plugin
 		}
 		catch (RuntimeException ex)
 		{
+			persistentSyncCoordinator.complete(
+				false, hash, accountHash, persistedFingerprint, null);
 			if (fingerprint != null)
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
