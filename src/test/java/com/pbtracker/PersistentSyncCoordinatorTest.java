@@ -188,4 +188,51 @@ public class PersistentSyncCoordinatorTest
 			LocalProfileLoadCoordinator.Decision.SKIP_ALREADY_LOADED,
 			localProfiles.onLoginState("current-account", "Current Player", 2_000L));
 	}
+
+	@Test
+	public void installRecoveryInvalidatesThePersistedGateBeforeItsDueProbe()
+	{
+		FakeConfigStore persistedConfig = new FakeConfigStore();
+		PersistedFingerprintStore store = new PersistedFingerprintStore(persistedConfig);
+		PersistentSyncCoordinator coordinator = new PersistentSyncCoordinator(
+			store, new LocalProfileLoadCoordinator());
+		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
+		String fingerprint = SyncFingerprint.compute(ACCOUNT, NAME, pbs());
+
+		coordinator.complete(true, ACCOUNT, ACCOUNT, fingerprint, changedOutcome());
+		assertTrue(coordinator.shouldSkip(false, ACCOUNT, fingerprint));
+
+		SyncClient.SyncErrorResponse pending = SyncClient.parseSyncErrorBody(
+			new com.google.gson.Gson(),
+			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":1}");
+		coordinator.invalidateFingerprint(ACCOUNT);
+		breaker.recordMismatch(ACCOUNT, pending, 1_000L);
+
+		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 1_999L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 2_000L).allowed);
+		assertFalse(coordinator.shouldSkip(false, ACCOUNT, fingerprint));
+	}
+
+	@Test
+	public void persistedSkipCannotLeaveARecoveryProbePermanentlyInFlight()
+	{
+		FakeConfigStore persistedConfig = new FakeConfigStore();
+		PersistentSyncCoordinator coordinator = new PersistentSyncCoordinator(
+			new PersistedFingerprintStore(persistedConfig), new LocalProfileLoadCoordinator());
+		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
+		String fingerprint = SyncFingerprint.compute(ACCOUNT, NAME, pbs());
+		coordinator.complete(true, ACCOUNT, ACCOUNT, fingerprint, changedOutcome());
+
+		SyncClient.SyncErrorResponse pending = SyncClient.parseSyncErrorBody(
+			new com.google.gson.Gson(),
+			"{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":1}");
+		breaker.recordMismatch(ACCOUNT, pending, 1_000L);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 2_000L).allowed);
+		assertTrue(coordinator.shouldSkip(false, ACCOUNT, fingerprint));
+
+		// Mirrors the persisted-skip branch in PbTrackerPlugin.
+		breaker.completeUnsuccessfulAutomaticAttempt(ACCOUNT, 2_000L);
+		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 61_999L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 62_000L).allowed);
+	}
 }

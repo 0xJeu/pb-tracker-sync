@@ -25,6 +25,12 @@ final class PersistentSyncCoordinator
 		return !force && fingerprintStore.matches(accountHash, fingerprint);
 	}
 
+	/** Clears a previously accepted payload when install recovery starts. */
+	void invalidateFingerprint(String accountHash)
+	{
+		fingerprintStore.clear(accountHash);
+	}
+
 	/**
 	 * Applies a completed network attempt. Only an accepted response records
 	 * the fingerprint or advances the local-profile coordinator.

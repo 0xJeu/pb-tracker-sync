@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -57,6 +58,56 @@ class SyncClient
 			.build();
 
 		httpClient.newCall(request).enqueue(callback);
+	}
+
+	SyncErrorResponse parseSyncErrorResponse(Response response)
+	{
+		ResponseBody responseBody = response.body();
+		if (responseBody == null)
+		{
+			return SyncErrorResponse.unknown();
+		}
+
+		try
+		{
+			return parseSyncErrorBody(gson, responseBody.string());
+		}
+		catch (IOException | RuntimeException ignored)
+		{
+			// Do not log the response body: a self-hosted endpoint could put
+			// request credentials or other sensitive data into an error body.
+			return SyncErrorResponse.unknown();
+		}
+	}
+
+	static SyncErrorResponse parseSyncErrorBody(Gson gson, String body)
+	{
+		if (body == null || body.trim().isEmpty())
+		{
+			return SyncErrorResponse.unknown();
+		}
+
+		try
+		{
+			SyncErrorResponse parsed = gson.fromJson(body, SyncErrorResponse.class);
+			if (parsed == null)
+			{
+				return SyncErrorResponse.unknown();
+			}
+
+			String code = parsed.code == null || parsed.code.trim().isEmpty()
+				? "UNKNOWN"
+				: parsed.code.trim().toUpperCase(Locale.ROOT);
+			Integer recoveryId = parsed.recoveryId != null && parsed.recoveryId > 0 ? parsed.recoveryId : null;
+			Long retryAfterSeconds = parsed.retryAfterSeconds != null && parsed.retryAfterSeconds > 0
+				? parsed.retryAfterSeconds
+				: null;
+			return new SyncErrorResponse(code, recoveryId, retryAfterSeconds);
+		}
+		catch (RuntimeException ignored)
+		{
+			return SyncErrorResponse.unknown();
+		}
 	}
 
 	/**
@@ -240,6 +291,25 @@ class SyncClient
 			this.displayName = displayName;
 			this.pbs = pbs;
 			this.installSecret = installSecret;
+		}
+	}
+
+	static final class SyncErrorResponse
+	{
+		final String code;
+		final Integer recoveryId;
+		final Long retryAfterSeconds;
+
+		private SyncErrorResponse(String code, Integer recoveryId, Long retryAfterSeconds)
+		{
+			this.code = code;
+			this.recoveryId = recoveryId;
+			this.retryAfterSeconds = retryAfterSeconds;
+		}
+
+		private static SyncErrorResponse unknown()
+		{
+			return new SyncErrorResponse("UNKNOWN", null, null);
 		}
 	}
 
