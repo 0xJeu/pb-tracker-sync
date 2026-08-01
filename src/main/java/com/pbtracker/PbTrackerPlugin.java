@@ -279,7 +279,7 @@ public class PbTrackerPlugin extends Plugin
 	private PbTrackerSidePanel sidePanel;
 	private net.runelite.client.ui.NavigationButton navButton;
 
-	private String accountHash;
+	private volatile String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private Dt2Scoreboard pendingDt2Scoreboard;
@@ -290,6 +290,33 @@ public class PbTrackerPlugin extends Plugin
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
 	private final InstallRecoveryCircuitBreaker installRecoveryCircuitBreaker =
 		new InstallRecoveryCircuitBreaker();
+	// Manual syncs bypass this store's gate. A 409 credential mismatch also
+	// clears the current account's value so an install-recovery probe cannot be
+	// mistaken for an unchanged successful payload.
+	private final PersistedFingerprintStore persistedFingerprintStore =
+		new PersistedFingerprintStore(new PersistedFingerprintStore.ConfigStore()
+		{
+			@Override
+			public String get(String key)
+			{
+				return configManager.getConfiguration(SETTINGS_GROUP, key);
+			}
+
+			@Override
+			public void set(String key, String value)
+			{
+				configManager.setConfiguration(SETTINGS_GROUP, key, value);
+			}
+
+			@Override
+			public void unset(String key)
+			{
+				configManager.unsetConfiguration(SETTINGS_GROUP, key);
+			}
+		});
+	private final LocalProfileLoadCoordinator localProfileLoadCoordinator = new LocalProfileLoadCoordinator();
+	private final PersistentSyncCoordinator persistentSyncCoordinator =
+		new PersistentSyncCoordinator(persistedFingerprintStore, localProfileLoadCoordinator);
 
 	// Adventure Log headings (lowercased) we've successfully parsed a record
 	// for this session - lets us tell whether a KNOWN_DUPLICATE_RAW_KEYS boss
@@ -309,7 +336,7 @@ public class PbTrackerPlugin extends Plugin
 		installSecret = getOrCreateInstallSecret();
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
-		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config);
+		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config, localProfileLoadCoordinator, () -> accountHash);
 		navButton = net.runelite.client.ui.NavigationButton.builder()
 			.tooltip("PB Tracker")
 			.icon(buildNavIcon())
@@ -411,6 +438,7 @@ public class PbTrackerPlugin extends Plugin
 			|| event.getGameState() == GameState.LOGIN_SCREEN_AUTHENTICATOR)
 		{
 			resetLoginSyncSession();
+			localProfileLoadCoordinator.reset();
 			if (sidePanel != null)
 			{
 				javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(null));
@@ -428,7 +456,7 @@ public class PbTrackerPlugin extends Plugin
 		}
 		if (sidePanel != null)
 		{
-			loadLocalPlayerPanelWhenReady(0);
+			loadLocalPlayerPanelWhenReady(0, currentAccountHash);
 		}
 	}
 
@@ -495,9 +523,15 @@ public class PbTrackerPlugin extends Plugin
 		}
 	}
 
-	private void loadLocalPlayerPanelWhenReady(int attempt)
+	private void loadLocalPlayerPanelWhenReady(int attempt, String forAccountHash)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		// Re-read the client hash before acting so a retry that started racing
+		// with an account change can never load or dedup under the previous account.
+		if (!forAccountHash.equals(String.valueOf(client.getAccountHash())))
 		{
 			return;
 		}
@@ -505,13 +539,20 @@ public class PbTrackerPlugin extends Plugin
 		if (localPlayer != null && localPlayer.getName() != null)
 		{
 			String displayName = localPlayer.getName();
+			LocalProfileLoadCoordinator.Decision decision =
+				localProfileLoadCoordinator.onLoginState(forAccountHash, displayName, System.currentTimeMillis());
+			if (decision != LocalProfileLoadCoordinator.Decision.LOAD)
+			{
+				log.debug("Skipping My PBs sidebar load for {}: {}", displayName, decision);
+				return;
+			}
 			log.debug("Loading My PBs sidebar for {} on attempt {}", displayName, attempt + 1);
 			javax.swing.SwingUtilities.invokeLater(() -> sidePanel.onLocalPlayerChanged(displayName));
 			return;
 		}
 		if (attempt < 4)
 		{
-			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1), 1, TimeUnit.SECONDS);
+			executor.schedule(() -> loadLocalPlayerPanelWhenReady(attempt + 1, forAccountHash), 1, TimeUnit.SECONDS);
 		}
 	}
 
@@ -1621,6 +1662,11 @@ public class PbTrackerPlugin extends Plugin
 		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
 		String suffix = statusNote != null ? " " + statusNote : "";
 		String fingerprint = usesAutomaticSyncGuards(force) ? buildSyncFingerprint(hash, pbs) : null;
+		// Always computed (even when force=true) so the successful-response
+		// callback below has a single, unconditional value to record - no
+		// ternary needed there, and the extra SHA-256 over a short string is
+		// negligible on the manual-sync path.
+		String persistedFingerprint = SyncFingerprint.compute(hash, name, pbs);
 
 		if (fingerprint != null && !automaticSyncDeduplicator.tryStart(fingerprint, System.currentTimeMillis()))
 		{
@@ -1641,6 +1687,17 @@ public class PbTrackerPlugin extends Plugin
 				return;
 			}
 		}
+		if (persistentSyncCoordinator.shouldSkip(force, hash, persistedFingerprint))
+		{
+			log.debug("Skipping automatic PB sync for {} PB(s): unchanged since last successful sync", pbs.size());
+			if (fingerprint != null)
+			{
+				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
+				installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+			}
+			setStatus("No PB changes since last successful sync" + suffix);
+			return;
+		}
 		if (startedStatus != null)
 		{
 			setStatus(startedStatus);
@@ -1653,6 +1710,8 @@ public class PbTrackerPlugin extends Plugin
 				@Override
 				public void onFailure(Call call, IOException e)
 				{
+					persistentSyncCoordinator.complete(
+						false, hash, accountHash, persistedFingerprint, null);
 					if (fingerprint != null)
 					{
 						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
@@ -1672,15 +1731,33 @@ public class PbTrackerPlugin extends Plugin
 						{
 							installRecoveryCircuitBreaker.recordSuccess(hash);
 							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
+							if (persistentSyncCoordinator.complete(
+								true, hash, accountHash, persistedFingerprint, outcome))
+							{
+								if (sidePanel != null)
+								{
+									loadLocalPlayerPanelWhenReady(0, hash);
+								}
+							}
 						}
 						else if (response.code() == 409)
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
+							// A credential mismatch starts or advances install recovery.
+							// Discard the previously successful payload marker so the one
+							// automatic probe permitted after the server backoff cannot be
+							// suppressed by the persisted unchanged-payload gate.
+							persistentSyncCoordinator.invalidateFingerprint(hash);
 							SyncClient.SyncErrorResponse syncError = syncClient.parseSyncErrorResponse(response);
 							installRecoveryCircuitBreaker.recordMismatch(hash, syncError, System.currentTimeMillis());
 							setStatus(formatInstallRecoveryStatus(syncError));
 						}
 						else
 						{
+							persistentSyncCoordinator.complete(
+								false, hash, accountHash, persistedFingerprint, null);
 							if (fingerprint != null)
 							{
 								installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
@@ -1701,6 +1778,8 @@ public class PbTrackerPlugin extends Plugin
 		}
 		catch (RuntimeException ex)
 		{
+			persistentSyncCoordinator.complete(
+				false, hash, accountHash, persistedFingerprint, null);
 			if (fingerprint != null)
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
@@ -1729,6 +1808,12 @@ public class PbTrackerPlugin extends Plugin
 			case "RECOVERY_REJECTED":
 				status = "Install recovery was rejected";
 				break;
+			case "RECOVERY_INVALIDATION_PENDING":
+				status = "Install recovery safety check pending";
+				break;
+			case "RECOVERY_INVALIDATION_FAILED":
+				status = "Install recovery safety check failed";
+				break;
 			default:
 				status = "Sync blocked: install credential mismatch";
 		}
@@ -1737,11 +1822,32 @@ public class PbTrackerPlugin extends Plugin
 		{
 			status += " (#" + response.recoveryId + ")";
 		}
-		if ("RECOVERY_PENDING".equals(response.code) && response.retryAfterSeconds != null)
+		if (InstallRecoveryCircuitBreaker.allowsTimedRetry(response) && response.retryAfterSeconds != null)
 		{
 			return status + ". Automatic sync paused for " + response.retryAfterSeconds + " seconds.";
 		}
 		return status + ". Automatic sync paused for this client session.";
+	}
+
+	/**
+	 * Replayed syncs and malformed responses cannot establish a new profile
+	 * state. A valid non-replayed zero-update response is still passed to the
+	 * coordinator, which only refreshes it when the prior lookup showed that
+	 * profile metadata may have been stale.
+	 */
+	static boolean isNonDeduplicatedSuccessfulSyncOutcome(SyncClient.SyncResponseDto outcome)
+	{
+		return outcome != null
+			&& (outcome.updated != null || outcome.metadataChanged != null)
+			&& !Boolean.TRUE.equals(outcome.deduplicated);
+	}
+
+	/** Returns true only when the response itself reports a profile-affecting change. */
+	static boolean shouldRefreshLocalProfileAfterSync(SyncClient.SyncResponseDto outcome)
+	{
+		return isNonDeduplicatedSuccessfulSyncOutcome(outcome)
+			&& (outcome.updated != null && outcome.updated > 0
+				|| Boolean.TRUE.equals(outcome.metadataChanged));
 	}
 
 	/**

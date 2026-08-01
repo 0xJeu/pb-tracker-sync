@@ -41,7 +41,7 @@ final class InstallRecoveryCircuitBreaker
 		// Only a pending candidate can become usable without changing the
 		// client credential. Contested/rejected candidates need operator or
 		// incumbent action, so automatic retries would only create noise.
-		if ("RECOVERY_PENDING".equals(response.code) && retryAfterSeconds != null)
+		if (allowsTimedRetry(response) && retryAfterSeconds != null)
 		{
 			long retryMillis;
 			try
@@ -58,6 +58,12 @@ final class InstallRecoveryCircuitBreaker
 		states.put(accountHash, new RecoveryState(response, blockedUntilMillis));
 	}
 
+	static boolean allowsTimedRetry(SyncClient.SyncErrorResponse response)
+	{
+		return "RECOVERY_PENDING".equals(response.code)
+			|| "RECOVERY_INVALIDATION_PENDING".equals(response.code);
+	}
+
 	synchronized void completeUnsuccessfulAutomaticAttempt(String accountHash, long nowMillis)
 	{
 		RecoveryState state = states.get(accountHash);
@@ -67,7 +73,16 @@ final class InstallRecoveryCircuitBreaker
 		}
 
 		state.probeInFlight = false;
-		state.blockedUntilMillis = Math.max(state.blockedUntilMillis, nowMillis + RETRY_FAILURE_BACKOFF_MILLIS);
+		long retryAt;
+		try
+		{
+			retryAt = Math.addExact(nowMillis, RETRY_FAILURE_BACKOFF_MILLIS);
+		}
+		catch (ArithmeticException ignored)
+		{
+			retryAt = Long.MAX_VALUE;
+		}
+		state.blockedUntilMillis = Math.max(state.blockedUntilMillis, retryAt);
 	}
 
 	synchronized void recordSuccess(String accountHash)

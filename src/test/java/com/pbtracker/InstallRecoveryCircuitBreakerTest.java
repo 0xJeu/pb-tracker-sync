@@ -82,6 +82,27 @@ public class InstallRecoveryCircuitBreakerTest
 	}
 
 	@Test
+	public void invalidationPendingGetsOneTimedProbeButInvalidationFailureDoesNot()
+	{
+		InstallRecoveryCircuitBreaker pendingBreaker = new InstallRecoveryCircuitBreaker();
+		pendingBreaker.recordMismatch(
+			"account",
+			response("{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"retryAfterSeconds\":2}"),
+			1_000L);
+
+		assertFalse(pendingBreaker.beginAutomaticAttempt("account", 2_999L).allowed);
+		assertTrue(pendingBreaker.beginAutomaticAttempt("account", 3_000L).allowed);
+
+		InstallRecoveryCircuitBreaker failedBreaker = new InstallRecoveryCircuitBreaker();
+		failedBreaker.recordMismatch(
+			"account",
+			response("{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"retryAfterSeconds\":2}"),
+			1_000L);
+
+		assertFalse(failedBreaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1).allowed);
+	}
+
+	@Test
 	public void successfulManualOrAutomaticSyncClearsTheBlock()
 	{
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
@@ -104,6 +125,19 @@ public class InstallRecoveryCircuitBreakerTest
 
 		assertEquals("Install recovery needs review (#19). Automatic sync paused for this client session.", status);
 		assertFalse(status.contains("installSecret"));
+	}
+
+	@Test
+	public void formatsCurrentBackendInvalidationStates()
+	{
+		assertEquals(
+			"Install recovery safety check pending (#20). Automatic sync paused for 30 seconds.",
+			PbTrackerPlugin.formatInstallRecoveryStatus(response(
+				"{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"recoveryId\":20,\"retryAfterSeconds\":30}")));
+		assertEquals(
+			"Install recovery safety check failed (#21). Automatic sync paused for this client session.",
+			PbTrackerPlugin.formatInstallRecoveryStatus(response(
+				"{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"recoveryId\":21,\"retryAfterSeconds\":30}")));
 	}
 
 	@Test
@@ -175,5 +209,20 @@ public class InstallRecoveryCircuitBreakerTest
 		assertTrue("payload claim is released", deduplicator.tryStart("payload", 2_002L));
 		assertFalse("recovery probe is released into short backoff",
 			breaker.beginAutomaticAttempt("account", 2_002L).allowed);
+	}
+
+	@Test
+	public void failedProbeBackoffSaturatesInsteadOfOverflowing()
+	{
+		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
+		breaker.recordMismatch(
+			"account",
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":1}"),
+			Long.MAX_VALUE - 2_000L);
+
+		assertTrue(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1_000L).allowed);
+		breaker.completeUnsuccessfulAutomaticAttempt("account", Long.MAX_VALUE - 1_000L);
+
+		assertFalse(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1L).allowed);
 	}
 }

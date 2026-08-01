@@ -12,7 +12,9 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.util.Locale;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /**
  * "My PBs" tab - auto-loads the logged-in player's own synced PBs, no typing
@@ -26,20 +28,29 @@ class MyPbsTab extends JPanel
 	private final PbListPanel listPanel;
 	private final JScrollPane scrollPane;
 	private final JLabel viewOnWebsiteButton;
+	private final LocalProfileLoadCoordinator localProfileLoadCoordinator;
+	private final Supplier<String> accountHashSupplier;
 	private long requestGeneration;
+	private volatile String inFlightDisplayName;
 
 	private String currentDisplayName;
 
-	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick)
+	MyPbsTab(SyncClient syncClient, SpriteManager spriteManager, PbTrackerConfig config, BiConsumer<String, String> onBossClick, LocalProfileLoadCoordinator localProfileLoadCoordinator, Supplier<String> accountHashSupplier)
 	{
 		this.syncClient = syncClient;
 		this.onBossClickHandler = onBossClick;
+		this.localProfileLoadCoordinator = localProfileLoadCoordinator;
+		this.accountHashSupplier = accountHashSupplier;
 		this.listPanel = new PbListPanel(spriteManager, config);
 		setLayout(new BorderLayout());
 		setBackground(PbTrackerTheme.BG);
 
 		viewOnWebsiteButton = buildViewOnWebsiteButton();
-		add(viewOnWebsiteButton, BorderLayout.NORTH);
+		JPanel header = new JPanel(new BorderLayout());
+		header.setOpaque(false);
+		header.add(viewOnWebsiteButton, BorderLayout.NORTH);
+		header.add(buildRefreshButton(), BorderLayout.SOUTH);
+		add(header, BorderLayout.NORTH);
 
 		scrollPane = new JScrollPane(listPanel);
 		scrollPane.setBorder(null);
@@ -72,6 +83,18 @@ class MyPbsTab extends JPanel
 		return button;
 	}
 
+	private JLabel buildRefreshButton()
+	{
+		JLabel button = new JLabel("Refresh My PBs", SwingConstants.CENTER);
+		button.setForeground(PbTrackerTheme.GOLD_LIGHT);
+		button.setFont(FontManager.getRunescapeSmallFont());
+		button.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
+		button.setOpaque(true);
+		button.setBackground(PbTrackerTheme.PANEL);
+		PbTrackerPlugin.addRowClickListener(button, this::refresh);
+		return button;
+	}
+
 	/** Every boss key this plugin knows about system-wide - forwarded to the list panel so untracked bosses can show a dash instead of being omitted. */
 	void setAllBosses(java.util.List<String> bosses)
 	{
@@ -81,6 +104,17 @@ class MyPbsTab extends JPanel
 	/** Called on login (and whenever the panel is (re)opened) with the local player's name. */
 	void load(String displayName)
 	{
+		String normalized = normalize(displayName);
+		if (normalized.equals(inFlightDisplayName))
+		{
+			// Coordinator-level gating (Task 2) already prevents most
+			// duplicate calls; this is a direct guard against any other
+			// caller re-entering load() for the same name while a lookup
+			// thread is still running.
+			return;
+		}
+		inFlightDisplayName = normalized;
+
 		currentDisplayName = displayName;
 		listPanel.showMessage("Loading...");
 		long request = ++requestGeneration;
@@ -89,6 +123,10 @@ class MyPbsTab extends JPanel
 			SyncClient.PlayerLookupResult result = syncClient.lookupPlayer(displayName);
 			SwingUtilities.invokeLater(() ->
 			{
+				if (normalized.equals(inFlightDisplayName))
+				{
+					inFlightDisplayName = null;
+				}
 				if (request != requestGeneration)
 				{
 					return;
@@ -98,20 +136,57 @@ class MyPbsTab extends JPanel
 					case FOUND:
 						listPanel.showPlayer(result.player, onBossClickHandler);
 						scrollToTop();
+						boolean returnedUnderDifferentName = result.player == null
+							|| !normalized.equals(normalize(result.player.displayName));
+						if (localProfileLoadCoordinator.markLoaded(returnedUnderDifferentName))
+						{
+							load(displayName);
+						}
 						break;
 					case NOT_FOUND:
 						listPanel.showMessage("No synced PB data found yet - sync with the plugin first.");
+						if (localProfileLoadCoordinator.markLoaded(true))
+						{
+							load(displayName);
+						}
 						break;
 					case AMBIGUOUS:
 						listPanel.showMessage("Multiple synced accounts share this name - check the website directly.");
+						if (localProfileLoadCoordinator.markLoaded(true))
+						{
+							load(displayName);
+						}
 						break;
 					case ERROR:
 					default:
 						listPanel.showMessage("Lookup failed - try again later.");
+						if (localProfileLoadCoordinator.markError(System.currentTimeMillis()))
+						{
+							load(displayName);
+						}
 						break;
 				}
 			});
 		}, "pbtracker-mypbs-lookup").start();
+	}
+
+	/** Goes through the coordinator's own manual-refresh decision (bypasses its "already loaded" cache but still coalesces a concurrent refresh at the coordinator level) so this path stays in sync with the coordinator's in-flight tracking instead of relying only on the local inFlightDisplayName guard. */
+	void refresh()
+	{
+		if (currentDisplayName == null)
+		{
+			return;
+		}
+		String accountHash = accountHashSupplier.get();
+		if (accountHash == null)
+		{
+			return;
+		}
+		LocalProfileLoadCoordinator.Decision decision = localProfileLoadCoordinator.onManualRefresh(accountHash, currentDisplayName);
+		if (decision == LocalProfileLoadCoordinator.Decision.LOAD)
+		{
+			load(currentDisplayName);
+		}
 	}
 
 	private void scrollToTop()
@@ -122,6 +197,7 @@ class MyPbsTab extends JPanel
 	void showLoggedOut()
 	{
 		requestGeneration++;
+		inFlightDisplayName = null;
 		currentDisplayName = null;
 		listPanel.showMessage("Log in to see your PBs.");
 	}
@@ -129,5 +205,10 @@ class MyPbsTab extends JPanel
 	void onSettingsChanged()
 	{
 		listPanel.onSettingsChanged();
+	}
+
+	private static String normalize(String displayName)
+	{
+		return displayName == null ? "" : displayName.trim().toLowerCase(Locale.ROOT);
 	}
 }
