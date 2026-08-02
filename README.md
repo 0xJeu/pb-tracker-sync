@@ -75,8 +75,10 @@ plugin installation. Reinstalling RuneLite or moving to another computer can
 therefore quarantine a sync for manual review instead of overwriting the
 account's public PBs.
 
-When that happens, **Last synced** shows a recovery ID. Toggle **Open recovery
-help** in the plugin settings to open a support page with that ID already
-filled in. Never send anyone a password, Jagex login, authenticator code, or
-the plugin's hidden install credential. The operator can review and resolve a
-contested request without the plugin rotating its shared install credential.
+Recovery is passive: **Last synced** reports that the installation is being
+verified, and the plugin retries at a bounded, low frequency while the backend
+operator reviews it. Rejected installations move to a much slower periodic
+check, so a later operator decision is still discovered automatically. Players
+do not need to open a recovery page, copy an identifier, restart RuneLite, or
+manually sync. Quarantined attempts never overwrite public PBs while review is
+pending, and the plugin never displays or logs its hidden install credential.

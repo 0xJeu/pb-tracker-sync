@@ -204,12 +204,12 @@ public class PersistentSyncCoordinatorTest
 
 		SyncClient.SyncErrorResponse pending = SyncClient.parseSyncErrorBody(
 			new com.google.gson.Gson(),
-			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":1}");
+			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":60}");
 		coordinator.invalidateFingerprint(ACCOUNT);
 		breaker.recordMismatch(ACCOUNT, pending, 1_000L);
 
-		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 1_999L).allowed);
-		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 2_000L).allowed);
+		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 60_999L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 61_000L).allowed);
 		assertFalse(coordinator.shouldSkip(false, ACCOUNT, fingerprint));
 	}
 
@@ -225,14 +225,14 @@ public class PersistentSyncCoordinatorTest
 
 		SyncClient.SyncErrorResponse pending = SyncClient.parseSyncErrorBody(
 			new com.google.gson.Gson(),
-			"{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":1}");
+			"{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":60}");
 		breaker.recordMismatch(ACCOUNT, pending, 1_000L);
-		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 2_000L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 61_000L).allowed);
 		assertTrue(coordinator.shouldSkip(false, ACCOUNT, fingerprint));
 
 		// Mirrors the persisted-skip branch in PbTrackerPlugin.
-		breaker.completeUnsuccessfulAutomaticAttempt(ACCOUNT, 2_000L);
-		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 61_999L).allowed);
-		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 62_000L).allowed);
+		breaker.completeUnsuccessfulAutomaticAttempt(ACCOUNT, 61_000L);
+		assertFalse(breaker.beginAutomaticAttempt(ACCOUNT, 120_999L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt(ACCOUNT, 121_000L).allowed);
 	}
 }

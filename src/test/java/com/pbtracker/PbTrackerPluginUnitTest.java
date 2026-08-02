@@ -28,17 +28,10 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
-	public void recoveryHelpUrlCarriesOnlySafeRecoveryMetadata()
+	public void recoveryDoesNotExposeAPlayerActionConfig()
 	{
-		assertEquals(
-			"https://osrs-pb-tracker-frontend.vercel.app/recovery?id=42&state=RECOVERY_CONTESTED",
-			PbTrackerPlugin.buildRecoveryHelpUrl(42, "RECOVERY_CONTESTED"));
-		assertEquals(
-			"https://osrs-pb-tracker-frontend.vercel.app/recovery?id=42",
-			PbTrackerPlugin.buildRecoveryHelpUrl(42, "unsafe value"));
-		assertEquals(
-			"https://osrs-pb-tracker-frontend.vercel.app/recovery",
-			PbTrackerPlugin.buildRecoveryHelpUrl(null, null));
+		assertFalse(Arrays.stream(PbTrackerConfig.class.getMethods())
+			.anyMatch(method -> "openRecoveryHelp".equals(method.getName())));
 	}
 
 	@Test
@@ -46,6 +39,19 @@ public class PbTrackerPluginUnitTest
 	{
 		assertFalse(PbTrackerPlugin.usesAutomaticSyncGuards(true));
 		assertTrue(PbTrackerPlugin.usesAutomaticSyncGuards(false));
+	}
+
+	@Test
+	public void lateAsyncResponseCannotOverwriteTheNewAccountsStatus()
+	{
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-b", "account-b", true));
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-a", "account-b", true));
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-a", "account-a", false));
+		assertTrue(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-b", "account-b", "account-b", true));
 	}
 
 	@Test

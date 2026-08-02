@@ -96,17 +96,13 @@ public class PbTrackerPlugin extends Plugin
 	private static final String SYNC_STATUS_KEY = "syncStatus";
 	private static final String DUMP_RAW_KEY = "dumpRawPbs";
 	private static final String OPEN_PROFILE_KEY = "openProfile";
-	private static final String OPEN_RECOVERY_HELP_KEY = "openRecoveryHelp";
-	private static final String RECOVERY_ID_KEY_PREFIX = "lastRecoveryId.";
-	private static final String RECOVERY_CODE_KEY_PREFIX = "lastRecoveryCode.";
 	private static final String SHOW_OVERALL_VARIANTS_KEY = "showOverallVariants";
 	private static final String SHOW_ROOM_VARIANTS_KEY = "showRoomVariants";
 	private static final String PROFILE_SITE_URL = "https://osrs-pb-tracker-frontend.vercel.app";
-	private static final String RECOVERY_SITE_URL = PROFILE_SITE_URL + "/recovery";
-	private static final String DEFAULT_API_BASE_URL = "https://osrs-pb-tracker-backend.vercel.app";
 	private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 	private static final long LOGIN_SYNC_DELAY_SECONDS = 5;
 	private static final long AUTOMATIC_DUPLICATE_WINDOW_MILLIS = TimeUnit.SECONDS.toMillis(30);
+	private static final long RECOVERY_PROBE_FAILURE_RETRY_MILLIS = TimeUnit.MINUTES.toMillis(5);
 
 	// Matches any "Fastest <descriptor>: <value>" line on the Adventure Log
 	// Counters page, e.g. "Fastest kill: 3:34", "Fastest run: -",
@@ -291,6 +287,7 @@ public class PbTrackerPlugin extends Plugin
 	private final Object loginSyncLock = new Object();
 	private final LoginSyncSession loginSyncSession = new LoginSyncSession();
 	private ScheduledFuture<?> pendingLoginSync;
+	private InstallRecoveryRetryCoordinator recoveryRetryCoordinator;
 	private final AutomaticSyncDeduplicator automaticSyncDeduplicator =
 		new AutomaticSyncDeduplicator(AUTOMATIC_DUPLICATE_WINDOW_MILLIS);
 	private final InstallRecoveryCircuitBreaker installRecoveryCircuitBreaker =
@@ -300,6 +297,27 @@ public class PbTrackerPlugin extends Plugin
 	// mistaken for an unchanged successful payload.
 	private final PersistedFingerprintStore persistedFingerprintStore =
 		new PersistedFingerprintStore(new PersistedFingerprintStore.ConfigStore()
+		{
+			@Override
+			public String get(String key)
+			{
+				return configManager.getConfiguration(SETTINGS_GROUP, key);
+			}
+
+			@Override
+			public void set(String key, String value)
+			{
+				configManager.setConfiguration(SETTINGS_GROUP, key, value);
+			}
+
+			@Override
+			public void unset(String key)
+			{
+				configManager.unsetConfiguration(SETTINGS_GROUP, key);
+			}
+		});
+	private final PersistedRecoveryRetryStore persistedRecoveryRetryStore =
+		new PersistedRecoveryRetryStore(new PersistedFingerprintStore.ConfigStore()
 		{
 			@Override
 			public String get(String key)
@@ -339,6 +357,16 @@ public class PbTrackerPlugin extends Plugin
 	protected void startUp()
 	{
 		installSecret = getOrCreateInstallSecret();
+		recoveryRetryCoordinator = new InstallRecoveryRetryCoordinator(
+			System::currentTimeMillis,
+			(task, delayMillis) ->
+			{
+				ScheduledFuture<?> future = executor.schedule(task, delayMillis, TimeUnit.MILLISECONDS);
+				return () -> future.cancel(false);
+			},
+			persistedRecoveryRetryStore,
+			this::runScheduledRecoveryRetry,
+			InstallRecoveryRetryCoordinator::boundedDeterministicJitter);
 		chatCommandManager.registerCommandAsync(PBR_COMMAND_STRING, this::pbrLookup);
 
 		sidePanel = new PbTrackerSidePanel(syncClient, spriteManager, config, localProfileLoadCoordinator, () -> accountHash);
@@ -455,6 +483,7 @@ public class PbTrackerPlugin extends Plugin
 	{
 		String currentAccountHash = String.valueOf(client.getAccountHash());
 		accountHash = currentAccountHash;
+		recoveryRetryCoordinator.activateAccount(currentAccountHash);
 		if (config.syncOnLogin())
 		{
 			scheduleLoginSync(currentAccountHash);
@@ -517,6 +546,63 @@ public class PbTrackerPlugin extends Plugin
 			loginSyncSession.reset();
 			cancelPendingLoginSyncLocked();
 		}
+		if (recoveryRetryCoordinator != null)
+		{
+			recoveryRetryCoordinator.deactivate();
+		}
+	}
+
+	private void scheduleRecoveryRetry(String forAccountHash)
+	{
+		Long delayMillis = installRecoveryCircuitBreaker.millisUntilAutomaticRetry(
+			forAccountHash, System.currentTimeMillis());
+		if (delayMillis == null)
+		{
+			// After a client restart the durable deadline remains but the
+			// in-memory breaker intentionally starts empty. If that reconstructed
+			// probe fails before receiving another 409, re-arm only when the
+			// durable marker proves this was already a recovery attempt.
+			recoveryRetryCoordinator.scheduleFallbackIfTracked(
+				forAccountHash, RECOVERY_PROBE_FAILURE_RETRY_MILLIS);
+			return;
+		}
+		recoveryRetryCoordinator.schedule(forAccountHash, delayMillis);
+	}
+
+	private void runScheduledRecoveryRetry(String scheduledAccountHash)
+	{
+		if (client.getGameState() != GameState.LOGGED_IN
+			|| !scheduledAccountHash.equals(String.valueOf(client.getAccountHash())))
+		{
+			return;
+		}
+
+		Long remainingMillis = installRecoveryCircuitBreaker.millisUntilAutomaticRetry(
+			scheduledAccountHash, System.currentTimeMillis());
+		if (remainingMillis == null)
+		{
+			// Restored after a plugin/client restart: the in-memory breaker is
+			// intentionally empty, so this one safe probe reconstructs it from
+			// the backend response if recovery is still pending.
+			runRecoveryProbeWithFallback(scheduledAccountHash);
+			return;
+		}
+		if (remainingMillis > 0)
+		{
+			scheduleRecoveryRetry(scheduledAccountHash);
+			return;
+		}
+		runRecoveryProbeWithFallback(scheduledAccountHash);
+	}
+
+	private void runRecoveryProbeWithFallback(String accountHashForProbe)
+	{
+		// Arm the safety net before collecting PBs or starting the request.
+		// Success clears it and a new 409 replaces it. This also covers an
+		// early return while RuneLite is still loading the local PB cache.
+		recoveryRetryCoordinator.scheduleFallbackIfTracked(
+			accountHashForProbe, RECOVERY_PROBE_FAILURE_RETRY_MILLIS);
+		syncAll(false);
 	}
 
 	private void cancelPendingLoginSyncLocked()
@@ -652,10 +738,6 @@ public class PbTrackerPlugin extends Plugin
 			else if (OPEN_PROFILE_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
 			{
 				executor.execute(this::openProfile);
-			}
-			else if (OPEN_RECOVERY_HELP_KEY.equals(event.getKey()) && shouldTriggerSyncNow(event.getNewValue()))
-			{
-				executor.execute(this::openRecoveryHelp);
 			}
 			else if ((SHOW_OVERALL_VARIANTS_KEY.equals(event.getKey()) || SHOW_ROOM_VARIANTS_KEY.equals(event.getKey()))
 				&& sidePanel != null)
@@ -1600,73 +1682,6 @@ public class PbTrackerPlugin extends Plugin
 		LinkBrowser.browse(url);
 	}
 
-	private void openRecoveryHelp()
-	{
-		String configuredApi = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
-		if (!DEFAULT_API_BASE_URL.equals(configuredApi))
-		{
-			setStatus("Recovery help is hosted for the default PB Tracker server. Contact your custom backend operator.");
-			return;
-		}
-		String hash = accountHash != null ? accountHash : String.valueOf(client.getAccountHash());
-		Integer recoveryId = parsePositiveInteger(
-			configManager.getConfiguration(SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash));
-		String recoveryCode = configManager.getConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash);
-		LinkBrowser.browse(buildRecoveryHelpUrl(recoveryId, recoveryCode));
-	}
-
-	private void persistRecoveryState(String hash, SyncClient.SyncErrorResponse response)
-	{
-		if (response.recoveryId == null)
-		{
-			clearRecoveryState(hash);
-			return;
-		}
-		configManager.setConfiguration(
-			SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash, String.valueOf(response.recoveryId));
-		configManager.setConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash, response.code);
-	}
-
-	private void clearRecoveryState(String hash)
-	{
-		configManager.unsetConfiguration(SETTINGS_GROUP, RECOVERY_ID_KEY_PREFIX + hash);
-		configManager.unsetConfiguration(SETTINGS_GROUP, RECOVERY_CODE_KEY_PREFIX + hash);
-	}
-
-	private static Integer parsePositiveInteger(String value)
-	{
-		if (value == null || !value.matches("[1-9]\\d*"))
-		{
-			return null;
-		}
-		try
-		{
-			int parsed = Integer.parseInt(value);
-			return parsed > 0 ? parsed : null;
-		}
-		catch (NumberFormatException ignored)
-		{
-			return null;
-		}
-	}
-
-	static String buildRecoveryHelpUrl(Integer recoveryId, String recoveryCode)
-	{
-		if (recoveryId == null || recoveryId <= 0)
-		{
-			return RECOVERY_SITE_URL;
-		}
-		StringBuilder url = new StringBuilder(RECOVERY_SITE_URL)
-			.append("?id=")
-			.append(recoveryId);
-		if (recoveryCode != null && recoveryCode.matches("[A-Z_]{1,80}"))
-		{
-			url.append("&state=")
-				.append(URLEncoder.encode(recoveryCode, StandardCharsets.UTF_8).replace("+", "%20"));
-		}
-		return url.toString();
-	}
-
 	/**
 	 * Pure formatting of a raw personalbest.* map into a diagnostic report,
 	 * annotating each entry with whether shouldSyncRawPersonalBest() would
@@ -1759,7 +1774,13 @@ public class PbTrackerPlugin extends Plugin
 				// was checked. Release it as unsuccessful so a later permitted
 				// recovery probe is never mistaken for an in-flight/successful send.
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
-				setStatus(formatInstallRecoveryStatus(decision.response));
+				setStatusIfCurrent(hash, formatInstallRecoveryStatus(decision.response));
+				Long retryDelayMillis = installRecoveryCircuitBreaker.millisUntilAutomaticRetry(
+					hash, System.currentTimeMillis());
+				if (retryDelayMillis != null)
+				{
+					recoveryRetryCoordinator.ensureScheduled(hash, retryDelayMillis);
+				}
 				return;
 			}
 		}
@@ -1770,13 +1791,14 @@ public class PbTrackerPlugin extends Plugin
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 				installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+				scheduleRecoveryRetry(hash);
 			}
-			setStatus("No PB changes since last successful sync" + suffix);
+			setStatusIfCurrent(hash, "No PB changes since last successful sync" + suffix);
 			return;
 		}
 		if (startedStatus != null)
 		{
-			setStatus(startedStatus);
+			setStatusIfCurrent(hash, startedStatus);
 		}
 
 		try
@@ -1792,9 +1814,10 @@ public class PbTrackerPlugin extends Plugin
 					{
 						automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 						installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+						scheduleRecoveryRetry(hash);
 					}
 					log.warn("PB sync failed", e);
-					setStatus("Sync failed: " + e.getMessage());
+					setStatusIfCurrent(hash, "Sync failed: " + e.getMessage());
 				}
 
 				@Override
@@ -1806,8 +1829,8 @@ public class PbTrackerPlugin extends Plugin
 						if (successful)
 						{
 							installRecoveryCircuitBreaker.recordSuccess(hash);
-							clearRecoveryState(hash);
-							setStatus("Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
+							recoveryRetryCoordinator.clear(hash);
+							setStatusIfCurrent(hash, "Last updated: " + TIMESTAMP_FORMAT.format(LocalDateTime.now()) + suffix);
 							SyncClient.SyncResponseDto outcome = syncClient.parseSyncResponse(response);
 							if (persistentSyncCoordinator.complete(
 								true, hash, accountHash, persistedFingerprint, outcome))
@@ -1828,9 +1851,9 @@ public class PbTrackerPlugin extends Plugin
 							// suppressed by the persisted unchanged-payload gate.
 							persistentSyncCoordinator.invalidateFingerprint(hash);
 							SyncClient.SyncErrorResponse syncError = syncClient.parseSyncErrorResponse(response);
-							persistRecoveryState(hash, syncError);
 							installRecoveryCircuitBreaker.recordMismatch(hash, syncError, System.currentTimeMillis());
-							setStatus(formatInstallRecoveryStatus(syncError));
+							setStatusIfCurrent(hash, formatInstallRecoveryStatus(syncError));
+							scheduleRecoveryRetry(hash);
 						}
 						else
 						{
@@ -1839,8 +1862,9 @@ public class PbTrackerPlugin extends Plugin
 							if (fingerprint != null)
 							{
 								installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+								scheduleRecoveryRetry(hash);
 							}
-							setStatus("Server responded with error " + response.code());
+							setStatusIfCurrent(hash, "Server responded with error " + response.code());
 						}
 					}
 					finally
@@ -1862,6 +1886,7 @@ public class PbTrackerPlugin extends Plugin
 			{
 				automaticSyncDeduplicator.finish(fingerprint, false, System.currentTimeMillis());
 				installRecoveryCircuitBreaker.completeUnsuccessfulAutomaticAttempt(hash, System.currentTimeMillis());
+				scheduleRecoveryRetry(hash);
 			}
 			throw ex;
 		}
@@ -1872,40 +1897,45 @@ public class PbTrackerPlugin extends Plugin
 		return !force;
 	}
 
+	private void setStatusIfCurrent(String capturedAccountHash, String text)
+	{
+		if (shouldApplyAccountScopedUpdate(
+			capturedAccountHash,
+			accountHash,
+			String.valueOf(client.getAccountHash()),
+			client.getGameState() == GameState.LOGGED_IN))
+		{
+			setStatus(text);
+		}
+	}
+
+	static boolean shouldApplyAccountScopedUpdate(
+		String capturedAccountHash,
+		String trackedAccountHash,
+		String clientAccountHash,
+		boolean loggedIn)
+	{
+		return loggedIn
+			&& capturedAccountHash != null
+			&& capturedAccountHash.equals(trackedAccountHash)
+			&& capturedAccountHash.equals(clientAccountHash);
+	}
+
 	static String formatInstallRecoveryStatus(SyncClient.SyncErrorResponse response)
 	{
-		String status;
-		switch (response.code)
+		if ("RECOVERY_REJECTED".equals(response.code))
 		{
-			case "RECOVERY_PENDING":
-				status = "Install recovery pending";
-				break;
-			case "RECOVERY_CONTESTED":
-				status = "Install recovery needs review";
-				break;
-			case "RECOVERY_REJECTED":
-				status = "Install recovery was rejected";
-				break;
-			case "RECOVERY_INVALIDATION_PENDING":
-				status = "Install recovery safety check pending";
-				break;
-			case "RECOVERY_INVALIDATION_FAILED":
-				status = "Install recovery safety check failed";
-				break;
-			default:
-				status = "Sync blocked: install credential mismatch";
+			return "This RuneLite installation was not approved. Sync will check again periodically.";
 		}
 
-		if (response.recoveryId != null)
+		switch (response.code)
 		{
-			status += " (#" + response.recoveryId + ")";
-			status += ". Open Recovery help in plugin settings";
+			case "RECOVERY_CONTESTED":
+			case "RECOVERY_INVALIDATION_FAILED":
+				return "This RuneLite installation is awaiting review. Sync will resume automatically when resolved.";
+			default:
+				return "Verifying this RuneLite installation. Sync will resume automatically.";
 		}
-		if (InstallRecoveryCircuitBreaker.allowsTimedRetry(response) && response.retryAfterSeconds != null)
-		{
-			return status + ". Automatic sync paused for " + response.retryAfterSeconds + " seconds.";
-		}
-		return status + ". Automatic sync paused for this client session.";
 	}
 
 	/**

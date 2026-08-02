@@ -67,23 +67,11 @@ public interface PbTrackerConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "openRecoveryHelp",
-		name = "Open recovery help",
-		description = "Toggle this (either direction) to open the recovery page. If the last sync returned "
-			+ "a recovery ID, it is included automatically.",
-		position = 5
-	)
-	default boolean openRecoveryHelp()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 		keyName = "dumpRawPbs",
 		name = "Copy raw PB data to clipboard",
 		description = "Toggle this (either direction) to copy every raw personalbest.* "
 			+ "value RuneLite has cached, and whether it would sync as-is, to your clipboard.",
-		position = 6
+		position = 5
 	)
 	default boolean dumpRawPbs()
 	{
@@ -94,7 +82,7 @@ public interface PbTrackerConfig extends Config
 		keyName = "openProfile",
 		name = "Open my profile in browser",
 		description = "Toggle this (either direction) to open your PB tracker profile page in your browser.",
-		position = 7
+		position = 6
 	)
 	default boolean openProfile()
 	{
@@ -106,7 +94,7 @@ public interface PbTrackerConfig extends Config
 		name = "Enable !pbr command",
 		description = "Type !pbr <boss> in chat (e.g. \"!pbr tob\") to see your personal best and leaderboard "
 			+ "rank for that boss, looked up from the PB tracker site.",
-		position = 8
+		position = 7
 	)
 	default boolean pbrCommand()
 	{
@@ -118,7 +106,7 @@ public interface PbTrackerConfig extends Config
 		name = "Right-click PB lookup",
 		description = "Add a \"Search PB\" right-click option on other players, matching the in-game "
 			+ "hiscore lookup option - opens the side panel's Search tab with their PBs.",
-		position = 9
+		position = 8
 	)
 	default boolean rightClickLookup()
 	{
@@ -130,7 +118,7 @@ public interface PbTrackerConfig extends Config
 		name = "Show \"Overall\" times",
 		description = "Show \"Overall\" times when a raid's team-size breakdown is expanded in the side "
 			+ "panel. Uncheck to hide them if you only care about Room times.",
-		position = 10
+		position = 9
 	)
 	default boolean showOverallVariants()
 	{
@@ -142,7 +130,7 @@ public interface PbTrackerConfig extends Config
 		name = "Show \"Room\" times",
 		description = "Show \"Room\" times when a raid's team-size breakdown is expanded in the side "
 			+ "panel. Uncheck to hide them if you only care about Overall times.",
-		position = 11
+		position = 10
 	)
 	default boolean showRoomVariants()
 	{
