@@ -53,53 +53,73 @@ public class InstallRecoveryCircuitBreakerTest
 
 		assertTrue(breaker.beginAutomaticAttempt("account", 1_000L).allowed);
 		breaker.recordMismatch("account", pending, 1_000L);
+		assertEquals(Long.valueOf(1L), breaker.millisUntilAutomaticRetry("account", 900_999L));
 		assertFalse(breaker.beginAutomaticAttempt("account", 900_999L).allowed);
 
 		assertTrue(breaker.beginAutomaticAttempt("account", 901_000L).allowed);
-		assertFalse("only one recovery probe may be in flight", breaker.beginAutomaticAttempt("account", 901_000L).allowed);
+		assertFalse("only one recovery probe may be in flight",
+			breaker.beginAutomaticAttempt("account", 901_000L).allowed);
+		assertEquals(Long.valueOf(60_000L), breaker.millisUntilAutomaticRetry("account", 901_000L));
 	}
 
 	@Test
-	public void mismatchWithoutRetryAfterBlocksForTheClientSession()
+	public void mismatchWithoutRetryAfterUsesLowFrequencyDefault()
 	{
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
 		breaker.recordMismatch("account", response("{\"code\":\"INSTALL_SECRET_MISMATCH\"}"), 10L);
 
-		assertFalse(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1).allowed);
+		assertFalse(breaker.beginAutomaticAttempt("account", 900_009L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt("account", 900_010L).allowed);
 	}
 
 	@Test
-	public void contestedRecoveryDoesNotKeepRetryingAutomatically()
+	public void contestedAndInvalidationFailuresKeepProbingForAdminResolution()
+	{
+		String[] codes = {
+			"RECOVERY_CONTESTED",
+			"RECOVERY_INVALIDATION_PENDING",
+			"RECOVERY_INVALIDATION_FAILED",
+			"RECOVERY_REVIEW_REQUIRED"
+		};
+		for (String code : codes)
+		{
+			InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
+			breaker.recordMismatch(
+				"account", response("{\"code\":\"" + code + "\",\"retryAfterSeconds\":60}"), 1_000L);
+
+			assertFalse(code, breaker.beginAutomaticAttempt("account", 60_999L).allowed);
+			assertTrue(code, breaker.beginAutomaticAttempt("account", 61_000L).allowed);
+		}
+	}
+
+	@Test
+	public void rejectedRecoveryUsesADormantProbeInsteadOfBecomingPermanent()
 	{
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
 		breaker.recordMismatch(
 			"account",
-			response("{\"code\":\"RECOVERY_CONTESTED\",\"recoveryId\":8,\"retryAfterSeconds\":900}"),
-			1_000L
-		);
+			response("{\"code\":\"RECOVERY_REJECTED\",\"retryAfterSeconds\":60}"),
+			1_000L);
 
-		assertFalse(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1).allowed);
+		assertFalse(breaker.beginAutomaticAttempt("account", 3_600_999L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt("account", 3_601_000L).allowed);
 	}
 
 	@Test
-	public void invalidationPendingGetsOneTimedProbeButInvalidationFailureDoesNot()
+	public void retryHintsAreClampedToAvoidStormsAndIndefiniteSilence()
 	{
-		InstallRecoveryCircuitBreaker pendingBreaker = new InstallRecoveryCircuitBreaker();
-		pendingBreaker.recordMismatch(
-			"account",
-			response("{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"retryAfterSeconds\":2}"),
-			1_000L);
-
-		assertFalse(pendingBreaker.beginAutomaticAttempt("account", 2_999L).allowed);
-		assertTrue(pendingBreaker.beginAutomaticAttempt("account", 3_000L).allowed);
-
-		InstallRecoveryCircuitBreaker failedBreaker = new InstallRecoveryCircuitBreaker();
-		failedBreaker.recordMismatch(
-			"account",
-			response("{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"retryAfterSeconds\":2}"),
-			1_000L);
-
-		assertFalse(failedBreaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1).allowed);
+		assertEquals(60_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":1}")));
+		assertEquals(900_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_PENDING\"}")));
+		assertEquals(3_600_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":999999999}")));
+		assertEquals(3_600_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_REJECTED\",\"retryAfterSeconds\":60}")));
+		assertEquals(21_600_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_REJECTED\"}")));
+		assertEquals(86_400_000L, InstallRecoveryCircuitBreaker.retryDelayMillis(
+			response("{\"code\":\"RECOVERY_REJECTED\",\"retryAfterSeconds\":999999999}")));
 	}
 
 	@Test
@@ -109,67 +129,65 @@ public class InstallRecoveryCircuitBreakerTest
 		breaker.recordMismatch(
 			"account",
 			response("{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":900}"),
-			1_000L
-		);
+			1_000L);
 
 		breaker.recordSuccess("account");
 		assertTrue(breaker.beginAutomaticAttempt("account", 1_001L).allowed);
+		assertNull(breaker.millisUntilAutomaticRetry("account", 1_001L));
 	}
 
 	@Test
-	public void formatsRecoveryStateWithoutCredentialMaterial()
+	public void recoveryStateIsIsolatedByAccountAndRestartFailsOpenSafely()
 	{
-		String status = PbTrackerPlugin.formatInstallRecoveryStatus(response(
+		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
+		breaker.recordMismatch(
+			"account-a",
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":900}"),
+			1_000L);
+
+		assertFalse(breaker.beginAutomaticAttempt("account-a", 1_001L).allowed);
+		assertTrue(breaker.beginAutomaticAttempt("account-b", 1_001L).allowed);
+
+		// A plugin restart forgets only the in-memory throttle. The next login
+		// performs one safe backend probe and reconstructs it from the response.
+		InstallRecoveryCircuitBreaker restarted = new InstallRecoveryCircuitBreaker();
+		assertTrue(restarted.beginAutomaticAttempt("account-a", 1_001L).allowed);
+	}
+
+	@Test
+	public void formatsRecoveryStateWithoutSensitiveOrOperatorMetadata()
+	{
+		String contested = PbTrackerPlugin.formatInstallRecoveryStatus(response(
 			"{\"code\":\"RECOVERY_CONTESTED\",\"recoveryId\":19,\"retryAfterSeconds\":900}"
 		));
+		assertEquals(
+			"This RuneLite installation is awaiting review. Sync will resume automatically when resolved.",
+			contested);
+		assertFalse(contested.contains("installSecret"));
+		assertFalse(contested.contains("19"));
 
-		assertEquals("Install recovery needs review (#19). Automatic sync paused for this client session.", status);
-		assertFalse(status.contains("installSecret"));
+		assertEquals(
+			"Verifying this RuneLite installation. Sync will resume automatically.",
+			PbTrackerPlugin.formatInstallRecoveryStatus(response(
+				"{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"recoveryId\":20}")));
+		assertEquals(
+			"This RuneLite installation is awaiting review. Sync will resume automatically when resolved.",
+			PbTrackerPlugin.formatInstallRecoveryStatus(response(
+				"{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"recoveryId\":21}")));
+		assertEquals(
+			"This RuneLite installation was not approved. Sync will check again periodically.",
+			PbTrackerPlugin.formatInstallRecoveryStatus(response(
+				"{\"code\":\"RECOVERY_REJECTED\",\"recoveryId\":22}")));
 	}
 
 	@Test
-	public void formatsCurrentBackendInvalidationStates()
-	{
-		assertEquals(
-			"Install recovery safety check pending (#20). Automatic sync paused for 30 seconds.",
-			PbTrackerPlugin.formatInstallRecoveryStatus(response(
-				"{\"code\":\"RECOVERY_INVALIDATION_PENDING\",\"recoveryId\":20,\"retryAfterSeconds\":30}")));
-		assertEquals(
-			"Install recovery safety check failed (#21). Automatic sync paused for this client session.",
-			PbTrackerPlugin.formatInstallRecoveryStatus(response(
-				"{\"code\":\"RECOVERY_INVALIDATION_FAILED\",\"recoveryId\":21,\"retryAfterSeconds\":30}")));
-	}
-
-	@Test
-	public void rejectedRecoveryGateReleasesTheClaimedPayloadFingerprint()
+	public void mismatchAndApprovalThenSuccessReleaseBothAutomaticGuards()
 	{
 		PbTrackerPlugin.AutomaticSyncDeduplicator deduplicator =
 			new PbTrackerPlugin.AutomaticSyncDeduplicator(30_000L);
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
 		SyncClient.SyncErrorResponse pending = response(
-			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":900}"
-		);
-		breaker.recordMismatch("account", pending, 1_000L);
-
-		assertTrue(deduplicator.tryStart("payload", 1_001L));
-		InstallRecoveryCircuitBreaker.AttemptDecision blocked =
-			breaker.beginAutomaticAttempt("account", 1_001L);
-		assertFalse(blocked.allowed);
-
-		// Mirrors PbTrackerPlugin: recovery rejection must release, not mark
-		// successful, the fingerprint claimed immediately before it.
-		deduplicator.finish("payload", false, 1_001L);
-		assertTrue(deduplicator.tryStart("payload", 1_002L));
-	}
-
-	@Test
-	public void mismatchAndSuccessReleaseBothAutomaticGuardsCorrectly()
-	{
-		PbTrackerPlugin.AutomaticSyncDeduplicator deduplicator =
-			new PbTrackerPlugin.AutomaticSyncDeduplicator(30_000L);
-		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
-		SyncClient.SyncErrorResponse pending = response(
-			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":1}"
+			"{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":60}"
 		);
 
 		assertTrue(deduplicator.tryStart("payload", 1_000L));
@@ -177,52 +195,48 @@ public class InstallRecoveryCircuitBreakerTest
 		breaker.recordMismatch("account", pending, 1_000L);
 		deduplicator.finish("payload", false, 1_000L);
 
-		// At the server's retry time, both guards permit exactly one probe.
-		assertTrue(deduplicator.tryStart("payload", 2_000L));
-		assertTrue(breaker.beginAutomaticAttempt("account", 2_000L).allowed);
+		assertTrue(deduplicator.tryStart("payload", 61_000L));
+		assertTrue(breaker.beginAutomaticAttempt("account", 61_000L).allowed);
 		breaker.recordSuccess("account");
-		deduplicator.finish("payload", true, 2_000L);
+		deduplicator.finish("payload", true, 61_000L);
 
-		// Recovery is clear, while exact-payload success dedup still applies.
-		assertFalse(deduplicator.tryStart("payload", 2_001L));
-		assertTrue(deduplicator.tryStart("payload", 32_000L));
-		assertTrue(breaker.beginAutomaticAttempt("account", 32_000L).allowed);
+		assertFalse(deduplicator.tryStart("payload", 61_001L));
+		assertTrue(deduplicator.tryStart("payload", 91_000L));
+		assertTrue(breaker.beginAutomaticAttempt("account", 91_000L).allowed);
 	}
 
 	@Test
-	public void failedRecoveryProbeDoesNotLeaveEitherGuardInFlight()
+	public void failedRecoveryProbeReleasesClaimsIntoBoundedBackoff()
 	{
 		PbTrackerPlugin.AutomaticSyncDeduplicator deduplicator =
 			new PbTrackerPlugin.AutomaticSyncDeduplicator(30_000L);
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
 		breaker.recordMismatch(
 			"account",
-			response("{\"code\":\"RECOVERY_PENDING\",\"recoveryId\":7,\"retryAfterSeconds\":1}"),
-			1_000L
-		);
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":60}"),
+			1_000L);
 
-		assertTrue(deduplicator.tryStart("payload", 2_000L));
-		assertTrue(breaker.beginAutomaticAttempt("account", 2_000L).allowed);
-		deduplicator.finish("payload", false, 2_001L);
-		breaker.completeUnsuccessfulAutomaticAttempt("account", 2_001L);
+		assertTrue(deduplicator.tryStart("payload", 61_000L));
+		assertTrue(breaker.beginAutomaticAttempt("account", 61_000L).allowed);
+		deduplicator.finish("payload", false, 61_001L);
+		breaker.completeUnsuccessfulAutomaticAttempt("account", 61_001L);
 
-		assertTrue("payload claim is released", deduplicator.tryStart("payload", 2_002L));
+		assertTrue("payload claim is released", deduplicator.tryStart("payload", 61_002L));
 		assertFalse("recovery probe is released into short backoff",
-			breaker.beginAutomaticAttempt("account", 2_002L).allowed);
+			breaker.beginAutomaticAttempt("account", 61_002L).allowed);
+		assertEquals(Long.valueOf(59_999L), breaker.millisUntilAutomaticRetry("account", 61_002L));
 	}
 
 	@Test
-	public void failedProbeBackoffSaturatesInsteadOfOverflowing()
+	public void retryDeadlinesSaturateInsteadOfOverflowing()
 	{
 		InstallRecoveryCircuitBreaker breaker = new InstallRecoveryCircuitBreaker();
 		breaker.recordMismatch(
 			"account",
-			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":1}"),
+			response("{\"code\":\"RECOVERY_PENDING\",\"retryAfterSeconds\":60}"),
 			Long.MAX_VALUE - 2_000L);
 
-		assertTrue(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1_000L).allowed);
-		breaker.completeUnsuccessfulAutomaticAttempt("account", Long.MAX_VALUE - 1_000L);
-
 		assertFalse(breaker.beginAutomaticAttempt("account", Long.MAX_VALUE - 1L).allowed);
+		assertNull(breaker.millisUntilAutomaticRetry("account", Long.MAX_VALUE - 1L));
 	}
 }

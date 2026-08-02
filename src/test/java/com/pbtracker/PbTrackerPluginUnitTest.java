@@ -28,10 +28,30 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void recoveryDoesNotExposeAPlayerActionConfig()
+	{
+		assertFalse(Arrays.stream(PbTrackerConfig.class.getMethods())
+			.anyMatch(method -> "openRecoveryHelp".equals(method.getName())));
+	}
+
+	@Test
 	public void manualSyncBypassesAllAutomaticGuards()
 	{
 		assertFalse(PbTrackerPlugin.usesAutomaticSyncGuards(true));
 		assertTrue(PbTrackerPlugin.usesAutomaticSyncGuards(false));
+	}
+
+	@Test
+	public void lateAsyncResponseCannotOverwriteTheNewAccountsStatus()
+	{
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-b", "account-b", true));
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-a", "account-b", true));
+		assertFalse(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-a", "account-a", "account-a", false));
+		assertTrue(PbTrackerPlugin.shouldApplyAccountScopedUpdate(
+			"account-b", "account-b", "account-b", true));
 	}
 
 	@Test

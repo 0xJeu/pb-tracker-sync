@@ -12,6 +12,12 @@ import java.util.Map;
 final class InstallRecoveryCircuitBreaker
 {
 	private static final long RETRY_FAILURE_BACKOFF_MILLIS = 60_000L;
+	private static final long DEFAULT_RETRY_MILLIS = 15 * 60_000L;
+	private static final long MINIMUM_RETRY_MILLIS = 60_000L;
+	private static final long MAXIMUM_RETRY_MILLIS = 60 * 60_000L;
+	private static final long REJECTED_DEFAULT_RETRY_MILLIS = 6 * 60 * 60_000L;
+	private static final long REJECTED_MINIMUM_RETRY_MILLIS = 60 * 60_000L;
+	private static final long REJECTED_MAXIMUM_RETRY_MILLIS = 24 * 60 * 60_000L;
 
 	private final Map<String, RecoveryState> states = new HashMap<>();
 
@@ -36,32 +42,62 @@ final class InstallRecoveryCircuitBreaker
 
 	synchronized void recordMismatch(String accountHash, SyncClient.SyncErrorResponse response, long nowMillis)
 	{
-		long blockedUntilMillis = Long.MAX_VALUE;
-		Long retryAfterSeconds = response.retryAfterSeconds;
-		// Only a pending candidate can become usable without changing the
-		// client credential. Contested/rejected candidates need operator or
-		// incumbent action, so automatic retries would only create noise.
-		if (allowsTimedRetry(response) && retryAfterSeconds != null)
+		long blockedUntilMillis;
+		// Every recovery state may later be changed by an operator. Even a
+		// rejected candidate gets a much slower dormant probe so a later
+		// reactivation is discovered without making the player reinstall.
+		try
 		{
-			long retryMillis;
-			try
-			{
-				retryMillis = Math.multiplyExact(retryAfterSeconds, 1_000L);
-				blockedUntilMillis = Math.addExact(nowMillis, retryMillis);
-			}
-			catch (ArithmeticException ignored)
-			{
-				blockedUntilMillis = Long.MAX_VALUE;
-			}
+			blockedUntilMillis = Math.addExact(nowMillis, retryDelayMillis(response));
+		}
+		catch (ArithmeticException ignored)
+		{
+			blockedUntilMillis = Long.MAX_VALUE;
 		}
 
 		states.put(accountHash, new RecoveryState(response, blockedUntilMillis));
 	}
 
-	static boolean allowsTimedRetry(SyncClient.SyncErrorResponse response)
+	static long retryDelayMillis(SyncClient.SyncErrorResponse response)
 	{
-		return "RECOVERY_PENDING".equals(response.code)
-			|| "RECOVERY_INVALIDATION_PENDING".equals(response.code);
+		boolean rejected = response != null && "RECOVERY_REJECTED".equals(response.code);
+		long defaultDelay = rejected ? REJECTED_DEFAULT_RETRY_MILLIS : DEFAULT_RETRY_MILLIS;
+		long minimumDelay = rejected ? REJECTED_MINIMUM_RETRY_MILLIS : MINIMUM_RETRY_MILLIS;
+		long maximumDelay = rejected ? REJECTED_MAXIMUM_RETRY_MILLIS : MAXIMUM_RETRY_MILLIS;
+		if (response == null || response.retryAfterSeconds == null)
+		{
+			return defaultDelay;
+		}
+
+		long requestedMillis;
+		try
+		{
+			requestedMillis = Math.multiplyExact(response.retryAfterSeconds, 1_000L);
+		}
+		catch (ArithmeticException ignored)
+		{
+			requestedMillis = maximumDelay;
+		}
+		return Math.max(minimumDelay, Math.min(requestedMillis, maximumDelay));
+	}
+
+	/**
+	 * Returns null when no automatic recovery retry is appropriate, otherwise
+	 * the delay until the next single probe. An in-flight probe gets a short
+	 * guard delay so unrelated automatic triggers cannot create a tight loop.
+	 */
+	synchronized Long millisUntilAutomaticRetry(String accountHash, long nowMillis)
+	{
+		RecoveryState state = states.get(accountHash);
+		if (state == null || state.blockedUntilMillis == Long.MAX_VALUE)
+		{
+			return null;
+		}
+		if (state.probeInFlight)
+		{
+			return RETRY_FAILURE_BACKOFF_MILLIS;
+		}
+		return Math.max(0L, state.blockedUntilMillis - nowMillis);
 	}
 
 	synchronized void completeUnsuccessfulAutomaticAttempt(String accountHash, long nowMillis)
