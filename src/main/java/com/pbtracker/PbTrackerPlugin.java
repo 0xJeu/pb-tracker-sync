@@ -114,6 +114,25 @@ public class PbTrackerPlugin extends Plugin
 		"^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$"
 	);
 
+	// Doom of Mokhaiotl reports a fastest-time PB per delve level in chat -
+	// levels 1-7 individually and a combined "8+" past that. Unlike every other
+	// boss here, RuneLite's Chat Commands plugin does NOT store these under the
+	// "personalbest" config group (confirmed: no doom/delve key is ever written
+	// there), so the config-based sync path never sees them. We parse the chat
+	// lines directly instead. Two shapes, both carrying the level and a time:
+	//   "Delve level: 6 duration: 2:40.80 (new personal best)"          <- new PB
+	//   "Delve level: 4 duration: 1:50. Personal best: 1:35"            <- shows current PB
+	//   "Delve level: 8+ (16) duration: 1:48.6. Personal best: 0:52.6"  <- 8+, (16) is depth
+	private static final Pattern DOM_DELVE_NEW_PB_PATTERN = Pattern.compile(
+		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*(?<time>[0-9:.]+)\\s*\\(new personal best\\)",
+		Pattern.CASE_INSENSITIVE
+	);
+	private static final Pattern DOM_DELVE_CURRENT_PB_PATTERN = Pattern.compile(
+		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*[0-9:.]+\\.\\s*personal best:\\s*(?<time>[0-9:.]+)",
+		Pattern.CASE_INSENSITIVE
+	);
+	private static final Pattern DELVE_TIME_PATTERN = Pattern.compile("^(\\d+):([0-5]?\\d(?:\\.\\d+)?)$");
+
 	// Matches the Journalscroll TITLE widget's text (distinct from the
 	// TEXTLAYER widget the Counters records themselves live in). Confirmed
 	// live: on the Counters sub-page specifically it's a bare account name
@@ -1242,6 +1261,83 @@ public class PbTrackerPlugin extends Plugin
 			// The title and PB widgets populate after WidgetLoaded, so read them
 			// on the following game tick just like the Adventure Log parser.
 			pendingDt2Scoreboard = scoreboard;
+		}
+	}
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		if (!config.autoSync())
+		{
+			return;
+		}
+		ChatMessageType type = event.getType();
+		if (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM)
+		{
+			return;
+		}
+
+		String message = Text.removeTags(event.getMessage());
+		if (message.toLowerCase().indexOf("delve level:") < 0)
+		{
+			return;
+		}
+
+		String level;
+		String time;
+		Matcher matcher = DOM_DELVE_NEW_PB_PATTERN.matcher(message);
+		if (matcher.find())
+		{
+			level = matcher.group("level");
+			time = matcher.group("time");
+		}
+		else
+		{
+			matcher = DOM_DELVE_CURRENT_PB_PATTERN.matcher(message);
+			if (!matcher.find())
+			{
+				return;
+			}
+			level = matcher.group("level");
+			time = matcher.group("time");
+		}
+
+		Double seconds = parseDelveTime(time);
+		if (seconds == null)
+		{
+			return;
+		}
+
+		Map<String, Double> single = new HashMap<>();
+		single.put(delveBossKey(level), seconds);
+		syncPbs(single);
+	}
+
+	/**
+	 * The synced boss key for a Doom of Mokhaiotl delve level. Levels 1-7 are
+	 * their own key; everything past 8 is grouped as "8+". Prefixed with the
+	 * boss name so the backend groups it under Doom of Mokhaiotl.
+	 */
+	static String delveBossKey(String level)
+	{
+		return "Doom of Mokhaiotl - Delve " + level;
+	}
+
+	/** "2:40.80" -> 160.80, "0:57.60" -> 57.60, "1:50" -> 110.0. Null if unparseable. */
+	static Double parseDelveTime(String text)
+	{
+		Matcher m = DELVE_TIME_PATTERN.matcher(text.trim());
+		if (!m.matches())
+		{
+			return null;
+		}
+		try
+		{
+			return Integer.parseInt(m.group(1)) * 60.0 + Double.parseDouble(m.group(2));
+		}
+		catch (NumberFormatException ex)
+		{
+			return null;
 		}
 	}
 
