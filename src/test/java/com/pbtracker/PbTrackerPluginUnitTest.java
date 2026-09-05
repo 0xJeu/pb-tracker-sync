@@ -221,6 +221,32 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void doomScoreboardParsesEverySupportedTimedDelve()
+	{
+		Map<String, Double> records = PbTrackerPlugin.parseDoomTimedRecords(Arrays.asList(
+			"1:00", "2:01.20", "3:02", "4:03", "5:04", "6:05", "7:06", "8:07", "9:08.40"
+		));
+
+		assertEquals(9, records.size());
+		assertEquals(60.0, records.get("Doom of Mokhaiotl - Delve 1"), 0.001);
+		assertEquals(487.0, records.get("Doom of Mokhaiotl - Delve 8"), 0.001);
+		assertEquals(548.4, records.get("Doom of Mokhaiotl - Delve 8+"), 0.001);
+	}
+
+	@Test
+	public void doomScoreboardSkipsMissingInvalidAndNonPositiveTimes()
+	{
+		Map<String, Double> records = PbTrackerPlugin.parseDoomTimedRecords(Arrays.asList(
+			null, "-", "", "not a time", "0", "5:06", null, null, "10:11"
+		));
+
+		assertEquals(2, records.size());
+		assertEquals(306.0, records.get("Doom of Mokhaiotl - Delve 6"), 0.001);
+		assertEquals(611.0, records.get("Doom of Mokhaiotl - Delve 8+"), 0.001);
+		assertFalse(records.containsKey("Doom of Mokhaiotl - Delve 8"));
+	}
+
+	@Test
 	public void keepsNonRaidKeysThatContainDigits()
 	{
 		assertTrue(PbTrackerPlugin.shouldSyncRawPersonalBest("hallowed sepulchre floor 5"));

@@ -44,6 +44,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -283,6 +284,7 @@ public class PbTrackerPlugin extends Plugin
 	private volatile String accountHash;
 	private String installSecret;
 	private boolean journalScrollLoaded;
+	private boolean doomScoreboardLoaded;
 	private Dt2Scoreboard pendingDt2Scoreboard;
 	private final Object loginSyncLock = new Object();
 	private final LoginSyncSession loginSyncSession = new LoginSyncSession();
@@ -1235,6 +1237,12 @@ public class PbTrackerPlugin extends Plugin
 			// isn't populated until the following game tick.
 			journalScrollLoaded = true;
 		}
+		else if (event.getGroupId() == InterfaceID.DOM_SCOREBOARD)
+		{
+			// Doom's personal delve times populate after WidgetLoaded, so read
+			// the dedicated personal-time components on the next game tick.
+			doomScoreboardLoaded = true;
+		}
 
 		Dt2Scoreboard scoreboard = dt2ScoreboardForGroup(event.getGroupId());
 		if (scoreboard != null)
@@ -1248,6 +1256,12 @@ public class PbTrackerPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		if (doomScoreboardLoaded)
+		{
+			doomScoreboardLoaded = false;
+			syncDoomScoreboard();
+		}
+
 		if (pendingDt2Scoreboard != null)
 		{
 			Dt2Scoreboard scoreboard = pendingDt2Scoreboard;
@@ -1374,6 +1388,62 @@ public class PbTrackerPlugin extends Plugin
 			candidate = localPlayerName;
 		}
 		return candidate == null || candidate.trim().isEmpty() ? null : candidate.trim();
+	}
+
+	private void syncDoomScoreboard()
+	{
+		int[] personalTimeComponents = {
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_1_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_2_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_3_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_4_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_5_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_6_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_7_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_8_TIME_VAL,
+			InterfaceID.DomScoreboard.P_TOTAL_LEVEL_8__TIME_VAL
+		};
+		List<String> rawTimes = new ArrayList<>(personalTimeComponents.length);
+		for (int componentId : personalTimeComponents)
+		{
+			Widget widget = client.getWidget(componentId);
+			rawTimes.add(widget == null || widget.getText() == null
+				? null
+				: Text.removeTags(widget.getText()).trim());
+		}
+
+		Map<String, Double> pbs = parseDoomTimedRecords(rawTimes);
+		if (!pbs.isEmpty())
+		{
+			log.debug("Recovered {} timed Doom of Mokhaiotl PB(s) from its in-game scoreboard", pbs.size());
+			syncPbs(pbs);
+		}
+	}
+
+	static Map<String, Double> parseDoomTimedRecords(List<String> rawTimes)
+	{
+		Map<String, Double> pbs = new LinkedHashMap<>();
+		if (rawTimes == null)
+		{
+			return pbs;
+		}
+
+		int supportedTiers = Math.min(rawTimes.size(), 9);
+		for (int i = 0; i < supportedTiers; i++)
+		{
+			String rawTime = rawTimes.get(i);
+			Double seconds = rawTime == null || rawTime.trim().isEmpty()
+				? null
+				: parseTimeString(rawTime.trim());
+			if (seconds == null || seconds <= 0)
+			{
+				continue;
+			}
+
+			String tier = i == 8 ? "8+" : Integer.toString(i + 1);
+			pbs.put("Doom of Mokhaiotl - Delve " + tier, seconds);
+		}
+		return pbs;
 	}
 
 	private void syncDt2Scoreboard(Dt2Scoreboard scoreboard)
