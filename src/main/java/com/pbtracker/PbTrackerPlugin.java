@@ -1002,7 +1002,13 @@ public class PbTrackerPlugin extends Plugin
 	 */
 	static String[] splitBossSizeAndMode(String rawArgument)
 	{
-		String[] tokens = rawArgument.trim().split("\\s+");
+		String trimmedArgument = rawArgument.trim();
+		if (TrackedBosses.isDoomTimedDelve(trimmedArgument))
+		{
+			return new String[] { trimmedArgument, null, null };
+		}
+
+		String[] tokens = trimmedArgument.split("\\s+");
 		int end = tokens.length;
 		String sizeArg = null;
 		String modeArg = null;

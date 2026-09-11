@@ -429,6 +429,20 @@ public class PbTrackerPluginUnitTest
 	}
 
 	@Test
+	public void doesNotMistakeDoomDelveTierForRaidTeamSize()
+	{
+		for (int delve = 1; delve <= 8; delve++)
+		{
+			String boss = "Doom of Mokhaiotl - Delve " + delve;
+			assertEquals("[" + boss + ", null, null]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode(boss)));
+		}
+		assertEquals(
+			"[Doom of Mokhaiotl - Delve 8+, null, null]",
+			Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("Doom of Mokhaiotl - Delve 8+"))
+		);
+	}
+
+	@Test
 	public void splitsAnExplicitModeKeywordBeforeTheSize()
 	{
 		assertEquals("[tob, 2, entry]", Arrays.toString(PbTrackerPlugin.splitBossSizeAndMode("tob entry 2")));
@@ -474,6 +488,22 @@ public class PbTrackerPluginUnitTest
 		pb("tombs of amascut - expert - fastest overall (2 player)", 3607, 11),
 		pb("tombs of amascut - entry - fastest overall (solo)", 2377, 6)
 	);
+
+	@Test
+	public void exactDoomDelveCommandFindsTheSyncedTier()
+	{
+		List<SyncClient.PbEntryDto> fixture = Arrays.asList(
+			pb("doom of mokhaiotl - delve 7", 777.25, 4),
+			pb("doom of mokhaiotl - delve 8", 888.5, 9)
+		);
+		String[] parsed = PbTrackerPlugin.splitBossSizeAndMode("Doom of Mokhaiotl - Delve 8");
+		String boss = PbTrackerPlugin.resolveBossAlias(parsed[0]);
+		SyncClient.PbEntryDto match = PbTrackerPlugin.findPbrMatch(fixture, boss, parsed[1], parsed[2]);
+
+		assertNotNull(match);
+		assertEquals("doom of mokhaiotl - delve 8", match.boss);
+		assertEquals(888.5, match.timeSeconds, 0.001);
+	}
 
 	@Test
 	public void requestingATeamSizeIgnoresTheBareUnlabeledEntry()

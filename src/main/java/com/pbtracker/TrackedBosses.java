@@ -40,7 +40,7 @@ final class TrackedBosses
 		{
 			normalized = normalized.substring(4);
 		}
-		if (DOOM_TIMED_DELVE.matcher(normalized).matches())
+		if (isDoomTimedDelve(normalized))
 		{
 			return true;
 		}
@@ -52,5 +52,10 @@ final class TrackedBosses
 			}
 		}
 		return false;
+	}
+
+	static boolean isDoomTimedDelve(String boss)
+	{
+		return boss != null && DOOM_TIMED_DELVE.matcher(boss.trim().toLowerCase()).matches();
 	}
 }
