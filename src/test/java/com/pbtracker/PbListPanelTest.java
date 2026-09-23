@@ -116,6 +116,72 @@ public class PbListPanelTest
 		});
 	}
 
+	private static SyncClient.PbEntryDto entry(String boss, double timeSeconds, int rank)
+	{
+		SyncClient.PbEntryDto pb = new SyncClient.PbEntryDto();
+		pb.boss = boss;
+		pb.timeSeconds = timeSeconds;
+		pb.rank = rank;
+		return pb;
+	}
+
+	@Test
+	public void collapsedDoomRowShowsDeepestDelveAndItsTime() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			PbListPanel panel = new PbListPanel(null, new FakeConfig(true, true));
+			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
+			player.displayName = "Tester";
+			player.pbs = java.util.List.of(
+				entry("Doom of Mokhaiotl - Delve 1", 49, 1),
+				entry("Doom of Mokhaiotl - Delve 2", 55, 1),
+				entry("Doom of Mokhaiotl - Delve 3", 96, 1),
+				entry("Doom of Mokhaiotl - Delve 4", 113, 1),
+				entry("chambers of xeric - fastest overall (solo)", 2000, 3),
+				entry("chambers of xeric - fastest overall (3 players)", 1000, 2)
+			);
+			panel.setAllBosses(java.util.List.of("Doom of Mokhaiotl - Delve 1", "Doom of Mokhaiotl - Delve 8+"));
+			panel.showPlayer(player, (boss, name) -> { });
+
+			assertTrue(findLabelOrNull(panel, "1:53 (Delve 4)") != null);
+			assertTrue(findLabelOrNull(panel, "16:40") != null);
+			assertTrue(findTextAreaOrNull(panel, "Doom Of Mokhaiotl - Delve 1") == null);
+
+			JTextArea heading = findTextArea(panel, "Doom Of Mokhaiotl");
+			heading.dispatchEvent(new MouseEvent(heading, MouseEvent.MOUSE_PRESSED,
+				System.currentTimeMillis(), 0, 2, 2, 1, false));
+			assertTrue(findTextAreaOrNull(panel, "Delve 1   0:49   #1") != null);
+		});
+	}
+
+	@Test
+	public void formatsSummaryTimeWithOptionalTierSuffix()
+	{
+		assertEquals("1:53 (Delve 4)", PbListPanel.summaryTimeText(113, "Delve 4"));
+		assertEquals("1:53", PbListPanel.summaryTimeText(113, null));
+	}
+
+	private static javax.swing.JLabel findLabelOrNull(Container root, String text)
+	{
+		for (Component child : root.getComponents())
+		{
+			if (child instanceof javax.swing.JLabel && text.equals(((javax.swing.JLabel) child).getText()))
+			{
+				return (javax.swing.JLabel) child;
+			}
+			if (child instanceof Container)
+			{
+				javax.swing.JLabel found = findLabelOrNull((Container) child, text);
+				if (found != null)
+				{
+					return found;
+				}
+			}
+		}
+		return null;
+	}
+
 	private static JTextArea findTextArea(Container root, String text)
 	{
 		for (Component child : root.getComponents())

@@ -259,6 +259,131 @@ public class BossGroupsTest
 		assertEquals(2, group.variants.size());
 	}
 
+	private static final List<String> DOOM_TIERS_SHUFFLED = List.of(
+		"Doom of Mokhaiotl - Delve 8+", "Doom of Mokhaiotl - Delve 3", "Doom of Mokhaiotl - Delve 8",
+		"Doom of Mokhaiotl - Delve 1", "Doom of Mokhaiotl - Delve 5", "Doom of Mokhaiotl - Delve 2",
+		"Doom of Mokhaiotl - Delve 7", "Doom of Mokhaiotl - Delve 4", "Doom of Mokhaiotl - Delve 6"
+	);
+
+	@Test
+	public void groupsOnlyTrackedDoomDelveTiersUnderBosses()
+	{
+		assertTrue(BossGroups.isGroupedVariant("Doom of Mokhaiotl - Delve 1"));
+		assertTrue(BossGroups.isGroupedVariant("doom of mokhaiotl - delve 8+"));
+		assertFalse(BossGroups.isGroupedVariant("doom of mokhaiotl"));
+		assertFalse(BossGroups.isGroupedVariant("doom of mokhaiotl - delve 9"));
+		assertEquals(BossGroups.Category.BOSSES, BossGroups.categorize("Doom of Mokhaiotl - Delve 8+"));
+	}
+
+	@Test
+	public void collapsesDoomDelvesIntoOnePickerOrderedOneToEightThenEightPlus()
+	{
+		List<String> bosses = new java.util.ArrayList<>(DOOM_TIERS_SHUFFLED);
+		bosses.add("zulrah");
+
+		List<BossGroups.RaidBase> bases = BossGroups.getRaidBases(bosses);
+		assertEquals(1, bases.size());
+		assertEquals("Doom Of Mokhaiotl", bases.get(0).label);
+		assertEquals(List.of("zulrah"), BossGroups.getFlatBossKeys(bosses));
+
+		List<BossGroups.RaidMode> modes = BossGroups.getRaidModes(bosses, bases.get(0).base);
+		assertEquals(1, modes.size());
+		List<String> labels = modes.get(0).variants.stream().map(v -> v.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("Delve 1", "Delve 2", "Delve 3", "Delve 4", "Delve 5", "Delve 6",
+			"Delve 7", "Delve 8", "Delve 8+"), labels);
+		assertEquals("Doom of Mokhaiotl - Delve 8+", modes.get(0).variants.get(8).key);
+	}
+
+	@Test
+	public void summarizesDoomByDeepestDelveNotFastestTime()
+	{
+		List<BossGroups.PlayerPb> pbs = List.of(
+			pb("Doom of Mokhaiotl - Delve 1", 49, 1),
+			pb("Doom of Mokhaiotl - Delve 4", 113, 1),
+			pb("Doom of Mokhaiotl - Delve 2", 55, 1),
+			pb("Doom of Mokhaiotl - Delve 3", 96, 1)
+		);
+		BossGroups.PlayerRaidGroup group = findGroup(BossGroups.groupPlayerRaidPbs(pbs), "Doom Of Mokhaiotl");
+		assertEquals(BossGroups.SummaryRule.DEEPEST, group.summaryRule);
+		assertEquals("Doom of Mokhaiotl - Delve 4", group.summary.key);
+		assertEquals("Delve 4", group.summary.label);
+		assertEquals(113, group.summary.timeSeconds, 0.001);
+		List<String> labels = group.variants.stream().map(v -> v.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("Delve 1", "Delve 2", "Delve 3", "Delve 4"), labels);
+	}
+
+	@Test
+	public void treatsDelveEightPlusAsDeeperThanEightEvenWithGaps()
+	{
+		List<BossGroups.PlayerPb> pbs = List.of(
+			pb("Doom of Mokhaiotl - Delve 8+", 400, 3),
+			pb("Doom of Mokhaiotl - Delve 8", 300, 2),
+			pb("Doom of Mokhaiotl - Delve 5", 150, 9)
+		);
+		BossGroups.PlayerRaidGroup group = findGroup(BossGroups.groupPlayerRaidPbs(pbs), "Doom Of Mokhaiotl");
+		assertEquals("Delve 8+", group.summary.label);
+		List<String> labels = group.variants.stream().map(v -> v.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("Delve 5", "Delve 8", "Delve 8+"), labels);
+	}
+
+	@Test
+	public void fasterTimeWinsWhenDuplicateKeysMapToTheDeepestTier()
+	{
+		List<BossGroups.PlayerPb> pbs = List.of(
+			pb("Doom of Mokhaiotl - Delve 3", 96, 1),
+			pb("Doom of Mokhaiotl - Delve 4", 130, 2),
+			pb("doom of mokhaiotl - delve 4", 113, 1)
+		);
+		BossGroups.PlayerRaidGroup group = findGroup(BossGroups.groupPlayerRaidPbs(pbs), "Doom Of Mokhaiotl");
+		assertEquals("doom of mokhaiotl - delve 4", group.summary.key);
+		assertEquals(113, group.summary.timeSeconds, 0.001);
+		assertEquals(1, group.summary.rank);
+		assertEquals("Delve 4", group.summary.label);
+	}
+
+	@Test
+	public void usesDeepestRuleOnlyForDoom()
+	{
+		assertEquals(BossGroups.SummaryRule.DEEPEST, BossGroups.summaryRuleForBase("doom of mokhaiotl"));
+		assertEquals(BossGroups.SummaryRule.FASTEST, BossGroups.summaryRuleForBase("chambers of xeric"));
+		assertEquals(BossGroups.SummaryRule.FASTEST, BossGroups.summaryRuleForBase("the nightmare"));
+		assertEquals(BossGroups.SummaryRule.FASTEST, BossGroups.summaryRuleForBase("tzhaar-ket-rak's challenges"));
+	}
+
+	@Test
+	public void summarizesAPlayerWithOnlyOneDoomTier()
+	{
+		BossGroups.PlayerRaidGroup group = findGroup(
+			BossGroups.groupPlayerRaidPbs(List.of(pb("Doom of Mokhaiotl - Delve 2", 55, 4))), "Doom Of Mokhaiotl");
+		assertEquals("Delve 2", group.summary.label);
+		assertEquals(1, group.variants.size());
+	}
+
+	@Test
+	public void raidsKeepFastestTimeSummaryWithoutTierLabel()
+	{
+		List<BossGroups.PlayerPb> pbs = List.of(
+			pb("chambers of xeric - fastest overall (solo)", 2000, 3),
+			pb("chambers of xeric - fastest overall (3 players)", 1000, 1)
+		);
+		BossGroups.PlayerRaidGroup group = findGroup(BossGroups.groupPlayerRaidPbs(pbs), "Chambers Of Xeric");
+		assertEquals(BossGroups.SummaryRule.FASTEST, group.summaryRule);
+		assertEquals("chambers of xeric - fastest overall (3 players)", group.summary.key);
+	}
+
+	@Test
+	public void sortsOpenEndedTeamSizeRightAfterItsBase()
+	{
+		List<String> bosses = List.of(
+			"the nightmare - fastest overall (6+ players)",
+			"the nightmare - fastest overall (6 players)",
+			"the nightmare - fastest overall (5 players)"
+		);
+		List<BossGroups.RaidMode> modes = BossGroups.getRaidModes(bosses, "the nightmare");
+		List<String> labels = modes.get(0).variants.stream().map(v -> v.label).collect(java.util.stream.Collectors.toList());
+		assertEquals(List.of("5-Man", "6-Man", "6+"), labels);
+	}
+
 	private static BossGroups.PlayerRaidGroup findGroup(BossGroups.GroupedPlayerPbs result, String heading)
 	{
 		return result.groups.stream().filter(g -> g.heading.equals(heading)).findFirst()

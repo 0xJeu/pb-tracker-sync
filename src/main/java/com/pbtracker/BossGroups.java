@@ -57,6 +57,13 @@ final class BossGroups
 		"first", 1, "second", 2, "third", 3, "fourth", 4, "fifth", 5, "sixth", 6
 	);
 
+	// Only the exact tracked delve tiers are grouped (TrackedBosses'
+	// pattern), so an unsupported key like the bare "doom of mokhaiotl"
+	// stays a visible flat row instead of becoming a bogus tier.
+	private static final String DOOM_BASE = "doom of mokhaiotl";
+	private static final String DOOM_HEADING = PbTrackerPlugin.titleCase(DOOM_BASE);
+	private static final String DOOM_DELVE_PREFIX = DOOM_BASE + " - delve ";
+
 	private static final List<String> SLAYER_MONSTERS = List.of(
 		"kraken", "cerberus", "thermonuclear smoke devil", "alchemical hydra", "abyssal sire",
 		"grotesque guardians", "araxxor", "shellbane gryphon", "skotizo", "kalphite queen"
@@ -125,7 +132,7 @@ final class BossGroups
 	static boolean isGroupedVariant(String key)
 	{
 		String lower = key.trim().toLowerCase();
-		if (lower.startsWith(TZHAAR_CHALLENGE_PREFIX))
+		if (lower.startsWith(TZHAAR_CHALLENGE_PREFIX) || TrackedBosses.isDoomTimedDelve(lower))
 		{
 			return true;
 		}
@@ -153,7 +160,7 @@ final class BossGroups
 		{
 			return Category.MINIGAMES;
 		}
-		if (matchesCurated(bossKey, KNOWN_BOSSES))
+		if (TrackedBosses.isDoomTimedDelve(bossKey) || matchesCurated(bossKey, KNOWN_BOSSES))
 		{
 			return Category.BOSSES;
 		}
@@ -190,6 +197,11 @@ final class BossGroups
 			String subLabel = PbTrackerPlugin.titleCase(lower.substring(TZHAAR_CHALLENGE_PREFIX.length()).trim());
 			return new RaidVariant(bossKey, TZHAAR_CHALLENGE_BASE, "", TZHAAR_CHALLENGES_HEADING, subLabel);
 		}
+		if (TrackedBosses.isDoomTimedDelve(lower))
+		{
+			String tier = lower.substring(DOOM_DELVE_PREFIX.length());
+			return new RaidVariant(bossKey, DOOM_BASE, "", DOOM_HEADING, "Delve " + tier);
+		}
 
 		String[] segments = bossKey.trim().toLowerCase().split(" - ");
 		for (int i = 0; i < segments.length; i++)
@@ -206,9 +218,10 @@ final class BossGroups
 		return new RaidVariant(bossKey, base, mode, heading, subLabel);
 	}
 
-	private static final Pattern DIGIT_PATTERN = Pattern.compile("(\\d+)");
+	private static final Pattern DIGIT_PATTERN = Pattern.compile("(\\d+)(\\+)?");
 
-	private static int teamSizeRank(String subLabel)
+	/** Also the delve depth for Doom tiers - an open-ended "N+" tier (Delve 8+, 6+ Players) sorts right after N. */
+	private static double teamSizeRank(String subLabel)
 	{
 		String lower = subLabel.toLowerCase();
 		if (lower.contains("solo"))
@@ -223,7 +236,11 @@ final class BossGroups
 			}
 		}
 		Matcher m = DIGIT_PATTERN.matcher(lower);
-		return m.find() ? Integer.parseInt(m.group(1)) : 999;
+		if (!m.find())
+		{
+			return 999;
+		}
+		return Integer.parseInt(m.group(1)) + (m.group(2) != null ? 0.5 : 0);
 	}
 
 	private static int variantRank(String subLabel)
@@ -336,7 +353,7 @@ final class BossGroups
 		for (List<RaidVariant> variants : byHeading.values())
 		{
 			List<RaidVariant> sorted = new ArrayList<>(variants);
-			sorted.sort(Comparator.<RaidVariant>comparingInt(v -> teamSizeRank(v.subLabel))
+			sorted.sort(Comparator.<RaidVariant>comparingDouble(v -> teamSizeRank(v.subLabel))
 				.thenComparingInt(v -> variantRank(v.subLabel)));
 
 			// Compact "Fastest Overall (1 Player Hard Mode)" down to just
@@ -490,13 +507,34 @@ final class BossGroups
 		final String heading;
 		final PlayerRaidVariant summary;
 		final List<PlayerRaidVariant> variants;
+		final SummaryRule summaryRule;
 
-		PlayerRaidGroup(String heading, PlayerRaidVariant summary, List<PlayerRaidVariant> variants)
+		PlayerRaidGroup(String heading, PlayerRaidVariant summary, List<PlayerRaidVariant> variants, SummaryRule summaryRule)
 		{
 			this.heading = heading;
 			this.summary = summary;
 			this.variants = variants;
+			this.summaryRule = summaryRule;
 		}
+	}
+
+	enum SummaryRule
+	{
+		FASTEST, DEEPEST
+	}
+
+	// Which variant a grouped boss's collapsed row summarizes. Anything not
+	// listed uses the fastest-time rule. Doom's delve tiers are separate
+	// progress milestones rather than interchangeable team sizes, so its row
+	// shows how deep the player has got instead of their quickest (shallowest)
+	// tier.
+	private static final Map<String, SummaryRule> SUMMARY_RULE_BY_BASE = Map.of(
+		DOOM_BASE, SummaryRule.DEEPEST
+	);
+
+	static SummaryRule summaryRuleForBase(String base)
+	{
+		return SUMMARY_RULE_BY_BASE.getOrDefault(base, SummaryRule.FASTEST);
 	}
 
 	static final class GroupedPlayerPbs
@@ -513,7 +551,7 @@ final class BossGroups
 
 	private static final VariantKind[] KIND_PREFERENCE = { VariantKind.OVERALL, VariantKind.ROOM, VariantKind.OTHER, VariantKind.LEGACY };
 
-	private static PlayerRaidVariant pickSummary(List<PlayerRaidVariant> variants)
+	private static PlayerRaidVariant pickFastestSummary(List<PlayerRaidVariant> variants)
 	{
 		for (VariantKind kind : KIND_PREFERENCE)
 		{
@@ -533,6 +571,21 @@ final class BossGroups
 		return variants.get(0);
 	}
 
+	/** Deepest tier reached ("Delve 8+" beats "Delve 8"), with the fastest time breaking a tie between duplicate keys for one tier. */
+	private static PlayerRaidVariant pickDeepestSummary(List<PlayerRaidVariant> variants, List<String> subLabels)
+	{
+		int best = 0;
+		for (int i = 1; i < variants.size(); i++)
+		{
+			double depth = teamSizeRank(subLabels.get(i)) - teamSizeRank(subLabels.get(best));
+			if (depth > 0 || (depth == 0 && variants.get(i).timeSeconds < variants.get(best).timeSeconds))
+			{
+				best = i;
+			}
+		}
+		return variants.get(best);
+	}
+
 	static PlayerRaidVariant pickBestRanked(List<PlayerRaidVariant> variants)
 	{
 		return variants.stream()
@@ -546,6 +599,7 @@ final class BossGroups
 	{
 		List<PlayerPb> flat = new ArrayList<>();
 		Map<String, List<Object[]>> byHeading = new LinkedHashMap<>(); // [PlayerRaidVariant, subLabel]
+		Map<String, String> baseByHeading = new LinkedHashMap<>();
 
 		for (PlayerPb pb : pbs)
 		{
@@ -561,22 +615,28 @@ final class BossGroups
 				pb.timeSeconds, pb.rank, pb.updatedAt
 			);
 			byHeading.computeIfAbsent(parsed.heading, h -> new ArrayList<>()).add(new Object[] { entry, parsed.subLabel });
+			baseByHeading.put(parsed.heading, parsed.base);
 		}
 
 		List<PlayerRaidGroup> groups = new ArrayList<>();
 		for (Map.Entry<String, List<Object[]>> entry : byHeading.entrySet())
 		{
 			List<Object[]> raw = entry.getValue();
-			raw.sort(Comparator.<Object[]>comparingInt(o -> teamSizeRank((String) o[1]))
+			raw.sort(Comparator.<Object[]>comparingDouble(o -> teamSizeRank((String) o[1]))
 				.thenComparingInt(o -> variantRank((String) o[1])));
 
 			List<PlayerRaidVariant> sorted = new ArrayList<>();
+			List<String> subLabels = new ArrayList<>();
 			for (Object[] o : raw)
 			{
 				sorted.add((PlayerRaidVariant) o[0]);
+				subLabels.add((String) o[1]);
 			}
 
-			PlayerRaidVariant summary = pickSummary(sorted);
+			SummaryRule rule = summaryRuleForBase(baseByHeading.get(entry.getKey()));
+			PlayerRaidVariant summary = rule == SummaryRule.DEEPEST
+				? pickDeepestSummary(sorted, subLabels)
+				: pickFastestSummary(sorted);
 
 			Map<String, Integer> labelCounts = new LinkedHashMap<>();
 			for (PlayerRaidVariant v : sorted)
@@ -589,7 +649,7 @@ final class BossGroups
 				labeled.add(labelCounts.get(v.label) > 1 ? v.withLabel(v.label + " - " + kindName(v.kind)) : v);
 			}
 
-			groups.add(new PlayerRaidGroup(entry.getKey(), summary, labeled));
+			groups.add(new PlayerRaidGroup(entry.getKey(), summary, labeled, rule));
 		}
 
 		groups.sort(Comparator.comparing(g -> g.heading));
