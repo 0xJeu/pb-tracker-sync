@@ -156,6 +156,46 @@ public class PbListPanelTest
 	}
 
 	@Test
+	public void topBossesDoomRowShowsDeepestDelveNotBestRankedDelve() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			PbListPanel panel = new PbListPanel(null, new FakeConfig(true, true));
+			SyncClient.PlayerLookupResponse player = new SyncClient.PlayerLookupResponse();
+			player.displayName = "Tester";
+			player.pbs = java.util.List.of(
+				entry("Doom of Mokhaiotl - Delve 1", 49, 1),
+				entry("Doom of Mokhaiotl - Delve 4", 113, 7)
+			);
+			panel.setAllBosses(java.util.List.of("Doom of Mokhaiotl - Delve 1"));
+			panel.showPlayer(player, (boss, name) -> { });
+
+			// Once in Top Bosses, once in All Bosses - the shallow #1 delve never headlines.
+			assertEquals(2, countLabels(panel, "1:53 (Delve 4)"));
+			assertEquals(0, countLabels(panel, "0:49 (Delve 1)"));
+			assertTrue(findLabelOrNull(panel, "#7") != null);
+			assertTrue(findLabelOrNull(panel, "#1") == null);
+		});
+	}
+
+	private static int countLabels(Container root, String text)
+	{
+		int count = 0;
+		for (Component child : root.getComponents())
+		{
+			if (child instanceof javax.swing.JLabel && text.equals(((javax.swing.JLabel) child).getText()))
+			{
+				count++;
+			}
+			if (child instanceof Container)
+			{
+				count += countLabels((Container) child, text);
+			}
+		}
+		return count;
+	}
+
+	@Test
 	public void formatsSummaryTimeWithOptionalTierSuffix()
 	{
 		assertEquals("1:53 (Delve 4)", PbListPanel.summaryTimeText(113, "Delve 4"));

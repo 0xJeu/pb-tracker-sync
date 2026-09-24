@@ -320,13 +320,15 @@ class PbListPanel extends JPanel implements Scrollable
 			return new DisplayRow(heading, heading, primaryName, subtitle, false, 0, 0, templateClickKey, null);
 		}
 		List<BossGroups.PlayerRaidVariant> variants = playerGroup.variants.size() > 1 ? playerGroup.variants : null;
-		BossGroups.PlayerRaidVariant bestRanked = BossGroups.pickBestRanked(playerGroup.variants);
-		boolean showTier = playerGroup.summaryRule == BossGroups.SummaryRule.DEEPEST;
+		// Delve tiers are progress milestones, so Top Bosses shows (and ranks
+		// by) the deepest delve too rather than a shallow tier's better rank.
+		boolean deepest = playerGroup.summaryRule == BossGroups.SummaryRule.DEEPEST;
+		BossGroups.PlayerRaidVariant top = deepest ? playerGroup.summary : BossGroups.pickBestRanked(playerGroup.variants);
 		return new DisplayRow(heading, heading, primaryName, subtitle, true,
 			playerGroup.summary.timeSeconds, playerGroup.summary.rank, playerGroup.summary.key, variants,
-			showTier ? playerGroup.summary.label : null,
-			bestRanked.timeSeconds, bestRanked.rank, bestRanked.key,
-			showTier ? bestRanked.label : null);
+			deepest ? playerGroup.summary.label : null,
+			top.timeSeconds, top.rank, top.key,
+			deepest ? top.label : null);
 	}
 
 	private DisplayRow buildFlatRow(String key, BossGroups.PlayerPb pb)
