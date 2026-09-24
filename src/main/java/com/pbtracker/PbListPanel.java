@@ -148,20 +148,23 @@ class PbListPanel extends JPanel implements Scrollable
 		final int rank;
 		final String clickKey;
 		final List<BossGroups.PlayerRaidVariant> variants;
+		/** Shown in brackets after the time, e.g. "1:53 (Delve 4)"; null for no suffix. */
+		final String timeSuffix;
 		final double topTimeSeconds;
 		final int topRank;
 		final String topClickKey;
+		final String topTimeSuffix;
 
 		DisplayRow(String heading, String iconKey, String primaryName, String subtitle, boolean hasData,
 			double timeSeconds, int rank, String clickKey, List<BossGroups.PlayerRaidVariant> variants)
 		{
-			this(heading, iconKey, primaryName, subtitle, hasData, timeSeconds, rank, clickKey, variants,
-				timeSeconds, rank, clickKey);
+			this(heading, iconKey, primaryName, subtitle, hasData, timeSeconds, rank, clickKey, variants, null,
+				timeSeconds, rank, clickKey, null);
 		}
 
 		DisplayRow(String heading, String iconKey, String primaryName, String subtitle, boolean hasData,
-			double timeSeconds, int rank, String clickKey, List<BossGroups.PlayerRaidVariant> variants,
-			double topTimeSeconds, int topRank, String topClickKey)
+			double timeSeconds, int rank, String clickKey, List<BossGroups.PlayerRaidVariant> variants, String timeSuffix,
+			double topTimeSeconds, int topRank, String topClickKey, String topTimeSuffix)
 		{
 			this.heading = heading;
 			this.iconKey = iconKey;
@@ -172,15 +175,18 @@ class PbListPanel extends JPanel implements Scrollable
 			this.rank = rank;
 			this.clickKey = clickKey;
 			this.variants = variants;
+			this.timeSuffix = timeSuffix;
 			this.topTimeSeconds = topTimeSeconds;
 			this.topRank = topRank;
 			this.topClickKey = topClickKey;
+			this.topTimeSuffix = topTimeSuffix;
 		}
 
 		DisplayRow forTopBosses()
 		{
 			return new DisplayRow(heading, iconKey, primaryName, subtitle, hasData,
-				topTimeSeconds, topRank, topClickKey, variants);
+				topTimeSeconds, topRank, topClickKey, variants, topTimeSuffix,
+				topTimeSeconds, topRank, topClickKey, topTimeSuffix);
 		}
 	}
 
@@ -314,10 +320,15 @@ class PbListPanel extends JPanel implements Scrollable
 			return new DisplayRow(heading, heading, primaryName, subtitle, false, 0, 0, templateClickKey, null);
 		}
 		List<BossGroups.PlayerRaidVariant> variants = playerGroup.variants.size() > 1 ? playerGroup.variants : null;
-		BossGroups.PlayerRaidVariant bestRanked = BossGroups.pickBestRanked(playerGroup.variants);
+		// Delve tiers are progress milestones, so Top Bosses shows (and ranks
+		// by) the deepest delve too rather than a shallow tier's better rank.
+		boolean deepest = playerGroup.summaryRule == BossGroups.SummaryRule.DEEPEST;
+		BossGroups.PlayerRaidVariant top = deepest ? playerGroup.summary : BossGroups.pickBestRanked(playerGroup.variants);
 		return new DisplayRow(heading, heading, primaryName, subtitle, true,
 			playerGroup.summary.timeSeconds, playerGroup.summary.rank, playerGroup.summary.key, variants,
-			bestRanked.timeSeconds, bestRanked.rank, bestRanked.key);
+			deepest ? playerGroup.summary.label : null,
+			top.timeSeconds, top.rank, top.key,
+			deepest ? top.label : null);
 	}
 
 	private DisplayRow buildFlatRow(String key, BossGroups.PlayerPb pb)
@@ -407,7 +418,7 @@ class PbListPanel extends JPanel implements Scrollable
 		statsBlock.setBackground(PbTrackerTheme.PANEL);
 		if (row.hasData)
 		{
-			JLabel time = new JLabel(PbTrackerPlugin.formatTime(row.timeSeconds));
+			JLabel time = new JLabel(summaryTimeText(row.timeSeconds, row.timeSuffix));
 			time.setForeground(PbTrackerTheme.GOLD_LIGHT);
 			time.setFont(FontManager.getRunescapeBoldFont());
 			time.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
@@ -482,6 +493,12 @@ class PbListPanel extends JPanel implements Scrollable
 				addVariantSubRow(variant, displayName, onBossClick);
 			}
 		}
+	}
+
+	static String summaryTimeText(double timeSeconds, String suffix)
+	{
+		String time = PbTrackerPlugin.formatTime(timeSeconds);
+		return suffix != null ? time + " (" + suffix + ")" : time;
 	}
 
 	/** Lets "Show Overall/Room times" settings hide the corresponding team-size sub-rows to declutter the breakdown. */

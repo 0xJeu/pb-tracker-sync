@@ -1,6 +1,7 @@
 package com.pbtracker;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Display-side mirror of the backend/frontend tracked-boss allowlist. The
@@ -9,6 +10,10 @@ import java.util.List;
  */
 final class TrackedBosses
 {
+	private static final Pattern DOOM_TIMED_DELVE = Pattern.compile(
+		"^doom of mokhaiotl - delve (?:[1-8]|8\\+)$"
+	);
+
 	private static final List<String> PREFIXES = List.of(
 		"alchemical hydra", "amoxliatl", "araxxor", "chambers of xeric",
 		"corrupted gauntlet", "gauntlet", "duke sucellus", "fortis colosseum",
@@ -35,6 +40,10 @@ final class TrackedBosses
 		{
 			normalized = normalized.substring(4);
 		}
+		if (isDoomTimedDelve(normalized))
+		{
+			return true;
+		}
 		for (String prefix : PREFIXES)
 		{
 			if (normalized.startsWith(prefix))
@@ -43,5 +52,10 @@ final class TrackedBosses
 			}
 		}
 		return false;
+	}
+
+	static boolean isDoomTimedDelve(String boss)
+	{
+		return boss != null && DOOM_TIMED_DELVE.matcher(boss.trim().toLowerCase()).matches();
 	}
 }
