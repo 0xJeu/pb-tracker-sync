@@ -62,7 +62,7 @@ import java.util.regex.Pattern;
  * them to a custom backend so they can be shown on a public leaderboard
  * website, looked up by player name.
  * <p>
- * Three sync paths:
+ * Sync paths:
  *  - Live: on every ConfigChanged event in the "personalbest" group (i.e.
  *    the moment you get a new PB), we push just that one value.
  *  - Bulk: on login (and via the "Sync all PBs now" checkbox in the plugin's
@@ -77,6 +77,13 @@ import java.util.regex.Pattern;
  *    ambiguous. We separately read that same in-game page ourselves so we
  *    can label "fastest room" times distinctly (e.g. "Theatre of Blood -
  *    Fastest Room") instead of losing that distinction.
+ *  - Scoreboards: when an in-game boss scoreboard is opened we read it
+ *    directly - Doom of Mokhaiotl's per-delve times (which RuneLite doesn't
+ *    track at all) and the four Desert Treasure II bosses' normal and
+ *    Awakened PBs (see syncDoomScoreboard / syncDt2Scoreboard).
+ *  - Doom chat: the game reports each delve's time and PB in chat when a delve
+ *    ends, so Doom PBs sync without opening the scoreboard. Same boss keys as
+ *    the Doom scoreboard; see DelveChatCapture and parseDelveChatPb.
  */
 @Slf4j
 @PluginDescriptor(
@@ -304,9 +311,7 @@ public class PbTrackerPlugin extends Plugin
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private boolean doomScoreboardLoaded;
-	// "<account hash>|<boss key>" -> the delve PB chat capture last sent, so
-	// repeated chat reports of an unchanged PB don't each trigger a sync.
-	private final Map<String, Double> delveChatPbsSent = new HashMap<>();
+	private final DelveChatCapture delveChatCapture = new DelveChatCapture();
 	private Dt2Scoreboard pendingDt2Scoreboard;
 	private final Object loginSyncLock = new Object();
 	private final LoginSyncSession loginSyncSession = new LoginSyncSession();
@@ -1284,33 +1289,52 @@ public class PbTrackerPlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		if (!config.autoSync())
+		Map<String, Double> pb = delveChatCapture.pbToSync(
+			config.autoSync(), event.getType(), event.getMessage(), client.getAccountHash());
+		if (pb != null)
 		{
-			return;
+			syncPbs(pb);
 		}
-		ChatMessageType type = event.getType();
-		if (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM)
-		{
-			return;
-		}
+	}
 
-		Map<String, Double> pb = parseDelveChatPb(event.getMessage());
-		if (pb == null)
-		{
-			return;
-		}
+	/**
+	 * Decides which Doom delve PB chat lines turn into a sync. Kept separate
+	 * from the event handler so the gating and per-session de-duplication are
+	 * unit-testable without a live client.
+	 */
+	static final class DelveChatCapture
+	{
+		// "<account hash>|<boss key>" -> the PB last handed off for syncing.
+		private final Map<String, Double> sent = new HashMap<>();
 
-		// Every delve completion repeats the tier's current PB, so a long run
-		// would otherwise send the same unchanged value over and over. Only a
-		// value this session hasn't already sent for this account goes out.
-		Map.Entry<String, Double> entry = pb.entrySet().iterator().next();
-		String sentKey = client.getAccountHash() + "|" + entry.getKey();
-		if (entry.getValue().equals(delveChatPbsSent.get(sentKey)))
+		/**
+		 * The {boss key: seconds} entry to sync for this chat line, or null.
+		 * Only the game's own messages count (players can type the same text),
+		 * and only while auto-sync is on. Every delve completion repeats the
+		 * tier's current PB, so a value already handed off this session for
+		 * the same account and tier is skipped rather than re-sent each delve.
+		 */
+		Map<String, Double> pbToSync(boolean autoSync, ChatMessageType type, String message, long accountHash)
 		{
-			return;
+			if (!autoSync || (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM))
+			{
+				return null;
+			}
+			Map<String, Double> pb = parseDelveChatPb(message);
+			if (pb == null)
+			{
+				return null;
+			}
+
+			Map.Entry<String, Double> entry = pb.entrySet().iterator().next();
+			String sentKey = accountHash + "|" + entry.getKey();
+			if (entry.getValue().equals(sent.get(sentKey)))
+			{
+				return null;
+			}
+			sent.put(sentKey, entry.getValue());
+			return pb;
 		}
-		delveChatPbsSent.put(sentKey, entry.getValue());
-		syncPbs(pb);
 	}
 
 	/**
@@ -1353,7 +1377,7 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	/**
-	 * The synced boss key for a Doom of Mokhaiotl delve level. Levels 1-7 are
+	 * The synced boss key for a Doom of Mokhaiotl delve level. Levels 1-8 are
 	 * their own key; everything past 8 is grouped as "8+". Prefixed with the
 	 * boss name so the backend groups it under Doom of Mokhaiotl.
 	 */
