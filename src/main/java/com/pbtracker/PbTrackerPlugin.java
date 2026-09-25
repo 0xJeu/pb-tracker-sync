@@ -62,7 +62,7 @@ import java.util.regex.Pattern;
  * them to a custom backend so they can be shown on a public leaderboard
  * website, looked up by player name.
  * <p>
- * Three sync paths:
+ * Sync paths:
  *  - Live: on every ConfigChanged event in the "personalbest" group (i.e.
  *    the moment you get a new PB), we push just that one value.
  *  - Bulk: on login (and via the "Sync all PBs now" checkbox in the plugin's
@@ -77,6 +77,13 @@ import java.util.regex.Pattern;
  *    ambiguous. We separately read that same in-game page ourselves so we
  *    can label "fastest room" times distinctly (e.g. "Theatre of Blood -
  *    Fastest Room") instead of losing that distinction.
+ *  - Scoreboards: when an in-game boss scoreboard is opened we read it
+ *    directly - Doom of Mokhaiotl's per-delve times (which RuneLite doesn't
+ *    track at all) and the four Desert Treasure II bosses' normal and
+ *    Awakened PBs (see syncDoomScoreboard / syncDt2Scoreboard).
+ *  - Doom chat: the game reports each delve's time and PB in chat when a delve
+ *    ends, so Doom PBs sync without opening the scoreboard. Same boss keys as
+ *    the Doom scoreboard; see DelveChatCapture and parseDelveChatPb.
  */
 @Slf4j
 @PluginDescriptor(
@@ -114,6 +121,25 @@ public class PbTrackerPlugin extends Plugin
 	private static final Pattern RECORD_PATTERN = Pattern.compile(
 		"^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$"
 	);
+
+	// Doom of Mokhaiotl reports a fastest-time PB per delve level in chat -
+	// levels 1-8 individually and a combined "8+" past that. Unlike every other
+	// boss here, RuneLite's Chat Commands plugin does NOT store these under the
+	// "personalbest" config group (confirmed: no doom/delve key is ever written
+	// there), so the config-based sync path never sees them. We parse the chat
+	// lines directly instead. Two shapes, both carrying the level and a time:
+	//   "Delve level: 6 duration: 2:40.80 (new personal best)"          <- new PB
+	//   "Delve level: 4 duration: 1:50. Personal best: 1:35"            <- shows current PB
+	//   "Delve level: 8+ (16) duration: 1:48.6. Personal best: 0:52.6"  <- 8+, (16) is depth
+	private static final Pattern DOM_DELVE_NEW_PB_PATTERN = Pattern.compile(
+		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*(?<time>[0-9:.]+)\\s*\\(new personal best\\)",
+		Pattern.CASE_INSENSITIVE
+	);
+	private static final Pattern DOM_DELVE_CURRENT_PB_PATTERN = Pattern.compile(
+		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*[0-9:.]+\\.\\s*personal best:\\s*(?<time>[0-9:.]+)",
+		Pattern.CASE_INSENSITIVE
+	);
+	private static final Pattern DELVE_TIME_PATTERN = Pattern.compile("^(\\d+):([0-5]?\\d(?:\\.\\d+)?)$");
 
 	// Matches the Journalscroll TITLE widget's text (distinct from the
 	// TEXTLAYER widget the Counters records themselves live in). Confirmed
@@ -285,6 +311,7 @@ public class PbTrackerPlugin extends Plugin
 	private String installSecret;
 	private boolean journalScrollLoaded;
 	private boolean doomScoreboardLoaded;
+	private final DelveChatCapture delveChatCapture = new DelveChatCapture();
 	private Dt2Scoreboard pendingDt2Scoreboard;
 	private final Object loginSyncLock = new Object();
 	private final LoginSyncSession loginSyncSession = new LoginSyncSession();
@@ -1260,6 +1287,124 @@ public class PbTrackerPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		Map<String, Double> pb = delveChatCapture.pbToSync(
+			config.autoSync(), event.getType(), event.getMessage(), client.getAccountHash());
+		if (pb != null)
+		{
+			syncPbs(pb);
+		}
+	}
+
+	/**
+	 * Decides which Doom delve PB chat lines turn into a sync. Kept separate
+	 * from the event handler so the gating and per-session de-duplication are
+	 * unit-testable without a live client.
+	 */
+	static final class DelveChatCapture
+	{
+		// "<account hash>|<boss key>" -> the PB last handed off for syncing.
+		private final Map<String, Double> sent = new HashMap<>();
+
+		/**
+		 * The {boss key: seconds} entry to sync for this chat line, or null.
+		 * Only the game's own messages count (players can type the same text),
+		 * and only while auto-sync is on. Every delve completion repeats the
+		 * tier's current PB, so a value already handed off this session for
+		 * the same account and tier is skipped rather than re-sent each delve.
+		 */
+		Map<String, Double> pbToSync(boolean autoSync, ChatMessageType type, String message, long accountHash)
+		{
+			if (!autoSync || (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM))
+			{
+				return null;
+			}
+			Map<String, Double> pb = parseDelveChatPb(message);
+			if (pb == null)
+			{
+				return null;
+			}
+
+			Map.Entry<String, Double> entry = pb.entrySet().iterator().next();
+			String sentKey = accountHash + "|" + entry.getKey();
+			if (entry.getValue().equals(sent.get(sentKey)))
+			{
+				return null;
+			}
+			sent.put(sentKey, entry.getValue());
+			return pb;
+		}
+	}
+
+	/**
+	 * The timed-delve PB a Doom of Mokhaiotl chat line reports, as a single
+	 * {boss key: seconds} entry, or null when the line isn't one or can't be
+	 * trusted. Whole-second times are ignored: without the game's precise
+	 * timing setting chat rounds, and since the backend keeps whichever time
+	 * is lowest, a rounded "1:50" could overwrite a real 1:50.40.
+	 */
+	static Map<String, Double> parseDelveChatPb(String rawMessage)
+	{
+		if (rawMessage == null)
+		{
+			return null;
+		}
+		String message = Text.removeTags(rawMessage);
+		if (!message.toLowerCase().contains("delve level:"))
+		{
+			return null;
+		}
+
+		Matcher matcher = DOM_DELVE_NEW_PB_PATTERN.matcher(message);
+		if (!matcher.find())
+		{
+			matcher = DOM_DELVE_CURRENT_PB_PATTERN.matcher(message);
+			if (!matcher.find())
+			{
+				return null;
+			}
+		}
+
+		String key = delveBossKey(matcher.group("level"));
+		String time = matcher.group("time").replaceAll("\\.+$", "");
+		Double seconds = time.contains(".") ? parseDelveTime(time) : null;
+		if (seconds == null || !TrackedBosses.isDoomTimedDelve(key))
+		{
+			return null;
+		}
+		return Map.of(key, seconds);
+	}
+
+	/**
+	 * The synced boss key for a Doom of Mokhaiotl delve level. Levels 1-8 are
+	 * their own key; everything past 8 is grouped as "8+". Prefixed with the
+	 * boss name so the backend groups it under Doom of Mokhaiotl.
+	 */
+	static String delveBossKey(String level)
+	{
+		return "Doom of Mokhaiotl - Delve " + level;
+	}
+
+	/** "2:40.80" -> 160.80, "0:57.60" -> 57.60, "1:50" -> 110.0. Null if unparseable. */
+	static Double parseDelveTime(String text)
+	{
+		Matcher m = DELVE_TIME_PATTERN.matcher(text.trim());
+		if (!m.matches())
+		{
+			return null;
+		}
+		try
+		{
+			return Integer.parseInt(m.group(1)) * 60.0 + Double.parseDouble(m.group(2));
+		}
+		catch (NumberFormatException ex)
+		{
+			return null;
+		}
+	}
+
+	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		if (doomScoreboardLoaded)
@@ -1437,8 +1582,11 @@ public class PbTrackerPlugin extends Plugin
 		int supportedTiers = Math.min(rawTimes.size(), 9);
 		for (int i = 0; i < supportedTiers; i++)
 		{
+			// Whole-second fields are skipped for the same reason as in
+			// parseDelveChatPb: without precise timing the scoreboard rounds,
+			// and the backend keeps whichever time is lowest.
 			String rawTime = rawTimes.get(i);
-			Double seconds = rawTime == null || rawTime.trim().isEmpty()
+			Double seconds = rawTime == null || !rawTime.contains(".")
 				? null
 				: parseTimeString(rawTime.trim());
 			if (seconds == null || seconds <= 0)
