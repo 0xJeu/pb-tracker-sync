@@ -1582,8 +1582,11 @@ public class PbTrackerPlugin extends Plugin
 		int supportedTiers = Math.min(rawTimes.size(), 9);
 		for (int i = 0; i < supportedTiers; i++)
 		{
+			// Whole-second fields are skipped for the same reason as in
+			// parseDelveChatPb: without precise timing the scoreboard rounds,
+			// and the backend keeps whichever time is lowest.
 			String rawTime = rawTimes.get(i);
-			Double seconds = rawTime == null || rawTime.trim().isEmpty()
+			Double seconds = rawTime == null || !rawTime.contains(".")
 				? null
 				: parseTimeString(rawTime.trim());
 			if (seconds == null || seconds <= 0)

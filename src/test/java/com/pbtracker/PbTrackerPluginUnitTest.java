@@ -224,12 +224,12 @@ public class PbTrackerPluginUnitTest
 	public void doomScoreboardParsesEverySupportedTimedDelve()
 	{
 		Map<String, Double> records = PbTrackerPlugin.parseDoomTimedRecords(Arrays.asList(
-			"1:00", "2:01.20", "3:02", "4:03", "5:04", "6:05", "7:06", "8:07", "9:08.40"
+			"1:00.00", "2:01.20", "3:02.40", "4:03.60", "5:04.80", "6:05.40", "7:06.60", "8:07.20", "9:08.40"
 		));
 
 		assertEquals(9, records.size());
 		assertEquals(60.0, records.get("Doom of Mokhaiotl - Delve 1"), 0.001);
-		assertEquals(487.0, records.get("Doom of Mokhaiotl - Delve 8"), 0.001);
+		assertEquals(487.2, records.get("Doom of Mokhaiotl - Delve 8"), 0.001);
 		assertEquals(548.4, records.get("Doom of Mokhaiotl - Delve 8+"), 0.001);
 	}
 
@@ -237,13 +237,28 @@ public class PbTrackerPluginUnitTest
 	public void doomScoreboardSkipsMissingInvalidAndNonPositiveTimes()
 	{
 		Map<String, Double> records = PbTrackerPlugin.parseDoomTimedRecords(Arrays.asList(
-			null, "-", "", "not a time", "0", "5:06", null, null, "10:11"
+			null, "-", "", "not a time", "0.00", "5:06.00", null, null, "10:11.40"
 		));
 
 		assertEquals(2, records.size());
 		assertEquals(306.0, records.get("Doom of Mokhaiotl - Delve 6"), 0.001);
-		assertEquals(611.0, records.get("Doom of Mokhaiotl - Delve 8+"), 0.001);
+		assertEquals(611.4, records.get("Doom of Mokhaiotl - Delve 8+"), 0.001);
 		assertFalse(records.containsKey("Doom of Mokhaiotl - Delve 8"));
+	}
+
+	@Test
+	public void doomScoreboardSkipsWholeSecondTimes()
+	{
+		// Without the game's precise-timing setting the scoreboard rounds to
+		// whole seconds, and the backend keeps whichever time is lowest - so a
+		// rounded "1:50" could overwrite a real 1:50.40. Precise fields on the
+		// same scoreboard still sync.
+		Map<String, Double> records = PbTrackerPlugin.parseDoomTimedRecords(Arrays.asList(
+			"0:38", "0:34", "1:05.40", "1:04", null, null, null, null, "1:07"
+		));
+
+		assertEquals(1, records.size());
+		assertEquals(65.4, records.get("Doom of Mokhaiotl - Delve 3"), 0.001);
 	}
 
 	@Test
