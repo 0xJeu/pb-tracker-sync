@@ -136,7 +136,7 @@ public class PbTrackerPlugin extends Plugin
 		Pattern.CASE_INSENSITIVE
 	);
 	private static final Pattern DOM_DELVE_CURRENT_PB_PATTERN = Pattern.compile(
-		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*[0-9:.]+\\.\\s*personal best:\\s*(?<time>[0-9:.]+)",
+		"delve level:\\s*(?<level>\\d+\\+?)(?:\\s*\\(\\d+\\))?\\s*duration:\\s*[0-9:.]+\\.?\\s*personal best:\\s*(?<time>[0-9:.]+)",
 		Pattern.CASE_INSENSITIVE
 	);
 	private static final Pattern DELVE_TIME_PATTERN = Pattern.compile("^(\\d+):([0-5]?\\d(?:\\.\\d+)?)$");

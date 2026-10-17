@@ -46,6 +46,9 @@ public class DelvePbParsingTest
 	{
 		assertEquals(Map.of("Doom of Mokhaiotl - Delve 4", 95.4),
 			PbTrackerPlugin.parseDelveChatPb("Delve level: 4 duration: 1:50.40. Personal best: 1:35.40"));
+		// No full stop between the run time and "Personal best".
+		assertEquals(Map.of("Doom of Mokhaiotl - Delve 4", 95.4),
+			PbTrackerPlugin.parseDelveChatPb("Delve level: 4 duration: 1:50.40 Personal best: 1:35.40"));
 		// Trailing full stop after the PB time.
 		assertEquals(Map.of("Doom of Mokhaiotl - Delve 4", 95.4),
 			PbTrackerPlugin.parseDelveChatPb("Delve level: 4 duration: 1:50.40. Personal best: 1:35.40."));
