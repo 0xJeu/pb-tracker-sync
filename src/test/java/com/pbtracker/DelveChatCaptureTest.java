@@ -5,7 +5,9 @@ import net.runelite.api.ChatMessageType;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class DelveChatCaptureTest
 {
@@ -86,5 +88,44 @@ public class DelveChatCaptureTest
 			"Delve level: 4 duration: 1:35 (new personal best)", 1L));
 		// A rejected line records nothing, so the precise PB still goes out afterwards.
 		assertEquals(DELVE_4, capture.pbToSync(true, ChatMessageType.GAMEMESSAGE, NEW_PB, 1L));
+	}
+
+	@Test
+	public void flagsABossPbThatEqualsADelveTimeSeenThisSession()
+	{
+		// RuneLite's Chat Commands keeps the delve PB and applies it to the next
+		// boss killed, so that boss's "new PB" equals the delve time exactly.
+		PbTrackerPlugin.DelveChatCapture capture = new PbTrackerPlugin.DelveChatCapture();
+		capture.noteDelveTime(ChatMessageType.GAMEMESSAGE, "Delve level: 7 duration: 1:05.40. Personal best: 1:01.20", 1L);
+		assertTrue(capture.isLikelyDelveLeak(1L, "phosani's nightmare", 61.2));
+		// The run's own duration is not what RuneLite keeps from a non-PB line.
+		assertFalse(capture.isLikelyDelveLeak(1L, "phosani's nightmare", 65.4));
+	}
+
+	@Test
+	public void flagsLeaksOfWholeSecondDelveTimesToo()
+	{
+		// We never sync whole-second delve times, but RuneLite still leaks them.
+		PbTrackerPlugin.DelveChatCapture capture = new PbTrackerPlugin.DelveChatCapture();
+		capture.noteDelveTime(ChatMessageType.GAMEMESSAGE, "Delve level: 4 duration: 0:46 (new personal best)", 1L);
+		assertTrue(capture.isLikelyDelveLeak(1L, "yama", 46.0));
+	}
+
+	@Test
+	public void onlyFlagsTheSameAccountAndNonDoomBosses()
+	{
+		PbTrackerPlugin.DelveChatCapture capture = new PbTrackerPlugin.DelveChatCapture();
+		capture.noteDelveTime(ChatMessageType.GAMEMESSAGE, NEW_PB, 1L);
+		assertFalse(capture.isLikelyDelveLeak(2L, "yama", 95.4));
+		assertFalse(capture.isLikelyDelveLeak(1L, "Doom of Mokhaiotl - Delve 4", 95.4));
+		assertFalse(capture.isLikelyDelveLeak(1L, "yama", 95.6));
+	}
+
+	@Test
+	public void ignoresDelveTextTypedByPlayers()
+	{
+		PbTrackerPlugin.DelveChatCapture capture = new PbTrackerPlugin.DelveChatCapture();
+		capture.noteDelveTime(ChatMessageType.PUBLICCHAT, NEW_PB, 1L);
+		assertFalse(capture.isLikelyDelveLeak(1L, "yama", 95.4));
 	}
 }
