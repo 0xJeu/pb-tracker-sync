@@ -806,6 +806,12 @@ public class PbTrackerPlugin extends Plugin
 		try
 		{
 			double seconds = Double.parseDouble(rawValue);
+			if (delveChatCapture.isLikelyDelveLeak(client.getAccountHash(), boss, seconds))
+			{
+				log.debug("Skipping {} PB {}s: equals a Doom delve time seen this session", boss, seconds);
+				setStatus("Skipped a " + titleCase(boss) + " PB that matches a Doom delve time (a RuneLite chat-tracking mix-up).");
+				return;
+			}
 			Map<String, Double> single = new HashMap<>();
 			single.put(canonicalBossKey(boss), seconds);
 			syncPbs(single);
@@ -1289,6 +1295,7 @@ public class PbTrackerPlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
+		delveChatCapture.noteDelveTime(event.getType(), event.getMessage(), client.getAccountHash());
 		Map<String, Double> pb = delveChatCapture.pbToSync(
 			config.autoSync(), event.getType(), event.getMessage(), client.getAccountHash());
 		if (pb != null)
@@ -1306,6 +1313,50 @@ public class PbTrackerPlugin extends Plugin
 	{
 		// "<account hash>|<boss key>" -> the PB last handed off for syncing.
 		private final Map<String, Double> sent = new HashMap<>();
+		// account hash -> every delve PB time chat reported this session, in
+		// any precision (RuneLite leaks whole-second ones too).
+		private final Map<Long, Set<Double>> delveTimesSeen = new HashMap<>();
+
+		/** Remembers the PB time a game delve line reports, for isLikelyDelveLeak. */
+		synchronized void noteDelveTime(ChatMessageType type, String message, long accountHash)
+		{
+			if (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM)
+			{
+				return;
+			}
+			Matcher matcher = matchDelveLine(message);
+			Double seconds = matcher == null ? null : parseDelveTime(matcher.group("time").replaceAll("\\.+$", ""));
+			if (seconds != null)
+			{
+				delveTimesSeen.computeIfAbsent(accountHash, k -> new HashSet<>()).add(seconds);
+			}
+		}
+
+		/**
+		 * True when a non-Doom boss PB from RuneLite equals a delve time chat
+		 * reported this session. RuneLite's Chat Commands keeps a delve's
+		 * "personal best" time unpaired (Doom sends no kill-count chat line)
+		 * and assigns it to the next boss killed, so that boss's "new PB" is
+		 * really the delve time.
+		 * shortcut: in-memory only, so a leak saved before a client restart can
+		 * still go out in a later bulk sync; persist the skipped pairs if that
+		 * shows up in practice.
+		 */
+		synchronized boolean isLikelyDelveLeak(long accountHash, String bossKey, double seconds)
+		{
+			if (bossKey.trim().toLowerCase().startsWith("doom of mokhaiotl"))
+			{
+				return false;
+			}
+			for (double seen : delveTimesSeen.getOrDefault(accountHash, Set.of()))
+			{
+				if (Math.abs(seen - seconds) < 0.005)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
 
 		/**
 		 * The {boss key: seconds} entry to sync for this chat line, or null.
@@ -1314,7 +1365,7 @@ public class PbTrackerPlugin extends Plugin
 		 * tier's current PB, so a value already handed off this session for
 		 * the same account and tier is skipped rather than re-sent each delve.
 		 */
-		Map<String, Double> pbToSync(boolean autoSync, ChatMessageType type, String message, long accountHash)
+		synchronized Map<String, Double> pbToSync(boolean autoSync, ChatMessageType type, String message, long accountHash)
 		{
 			if (!autoSync || (type != ChatMessageType.GAMEMESSAGE && type != ChatMessageType.SPAM))
 			{
@@ -1346,6 +1397,29 @@ public class PbTrackerPlugin extends Plugin
 	 */
 	static Map<String, Double> parseDelveChatPb(String rawMessage)
 	{
+		Matcher matcher = matchDelveLine(rawMessage);
+		if (matcher == null)
+		{
+			return null;
+		}
+
+		String key = delveBossKey(matcher.group("level"));
+		String time = matcher.group("time").replaceAll("\\.+$", "");
+		Double seconds = time.contains(".") ? parseDelveTime(time) : null;
+		if (seconds == null || !TrackedBosses.isDoomTimedDelve(key))
+		{
+			return null;
+		}
+		return Map.of(key, seconds);
+	}
+
+	/**
+	 * A matcher positioned on a Doom delve PB line, with "level" and "time"
+	 * groups (time is the new PB, or the existing PB on a non-PB run - the
+	 * same value RuneLite's Chat Commands keeps), or null for any other line.
+	 */
+	private static Matcher matchDelveLine(String rawMessage)
+	{
 		if (rawMessage == null)
 		{
 			return null;
@@ -1357,23 +1431,12 @@ public class PbTrackerPlugin extends Plugin
 		}
 
 		Matcher matcher = DOM_DELVE_NEW_PB_PATTERN.matcher(message);
-		if (!matcher.find())
+		if (matcher.find())
 		{
-			matcher = DOM_DELVE_CURRENT_PB_PATTERN.matcher(message);
-			if (!matcher.find())
-			{
-				return null;
-			}
+			return matcher;
 		}
-
-		String key = delveBossKey(matcher.group("level"));
-		String time = matcher.group("time").replaceAll("\\.+$", "");
-		Double seconds = time.contains(".") ? parseDelveTime(time) : null;
-		if (seconds == null || !TrackedBosses.isDoomTimedDelve(key))
-		{
-			return null;
-		}
-		return Map.of(key, seconds);
+		matcher = DOM_DELVE_CURRENT_PB_PATTERN.matcher(message);
+		return matcher.find() ? matcher : null;
 	}
 
 	/**
@@ -1806,10 +1869,13 @@ public class PbTrackerPlugin extends Plugin
 		// Log parser instead, so sending the raw version here would just
 		// create a duplicate, differently-named row for the same record.
 		Map<String, Double> pbs = new HashMap<>();
+		long hash = client.getAccountHash();
 		for (Map.Entry<String, Double> entry : raw.entrySet())
 		{
 			String key = entry.getKey();
-			if (shouldSyncRawPersonalBest(key))
+			// A leaked Doom delve time stays in RuneLite's config until the next
+			// real kill of that boss, so filter it here as well as live.
+			if (shouldSyncRawPersonalBest(key) && !delveChatCapture.isLikelyDelveLeak(hash, key, entry.getValue()))
 			{
 				pbs.put(canonicalBossKey(key), entry.getValue());
 			}
